@@ -116,6 +116,54 @@ interface NameInfo {
   monitorDevicePath: string;
 }
 
+export interface MonitorDeviceInfo {
+  deviceName: string;
+  deviceString: string;
+  deviceId: string;
+  deviceKey: string;
+  stateFlags: number;
+}
+
+export interface DisplayDeviceInfo {
+  deviceName: string;
+  deviceString: string;
+  deviceId: string;
+  deviceKey: string;
+  stateFlags: number;
+  monitors: MonitorDeviceInfo[];
+}
+
+export interface DisplayMode {
+  width: number;
+  height: number;
+  refreshRate?: number;
+  refreshRateNumerator?: number;
+  refreshRateDenominator?: number;
+  bitsPerPel?: number;
+  displayFrequency?: number;
+  displayFlags?: number;
+  rawDeviceName?: string;
+  modeIndex?: number;
+  fields?: number;
+  positionX?: number;
+  positionY?: number;
+  fixedOutput?: number;
+  isCurrent?: boolean;
+  isRecommended?: boolean;
+}
+
+export interface CurrentDisplayMode {
+  width: number;
+  height: number;
+  refreshRate?: number;
+  refreshRateNumerator?: number;
+  refreshRateDenominator?: number;
+  devicePath: string;
+  displayName: string;
+  sourceConfigId: ConfigId;
+  targetConfigId: ConfigId;
+}
+
 export interface QueryDisplayConfigResults {
   pathArray: PathInfo[];
   modeInfoArray: ModeInfo[];
@@ -146,6 +194,33 @@ export interface ExtractedDisplayConfig {
 }
 
 export function extractDisplayConfig(): Promise<ExtractedDisplayConfig>;
+
+export function listDisplayDevices(): Promise<DisplayDeviceInfo[]>;
+
+export function getCurrentDisplayMode(args: {
+  deviceNameOrPath: string;
+}): Promise<CurrentDisplayMode>;
+
+export function getDisplayModes(args: {
+  deviceNameOrPath: string;
+  includeAllModes?: boolean;
+}): Promise<{
+  deviceName: string;
+  devicePath: string;
+  currentMode: CurrentDisplayMode;
+  modes: DisplayMode[];
+}>;
+
+export function setDisplayMode(args: {
+  deviceNameOrPath: string;
+  mode: DisplayMode;
+  persistent?: boolean;
+}): Promise<{
+  deviceName: string;
+  devicePath: string;
+  beforeMode: CurrentDisplayMode;
+  afterMode: CurrentDisplayMode;
+}>;
 
 export interface ToggleEnabledDisplayArgs {
   enablePaths: string[];

@@ -202,6 +202,152 @@ module.exports.queryDisplayConfig = () => {
   });
 };
 
+function win32_listDisplayDevices() {
+  return new Promise((resolve) => {
+    const ran = addon.win32_listDisplayDevices((_, result) => {
+      resolve(Array.isArray(result) ? result : []);
+    });
+    if (!ran) {
+      resolve([]);
+    }
+  });
+}
+
+function win32_getDisplayModes(deviceName, includeRawModes = false) {
+  return new Promise((resolve, reject) => {
+    const ran = addon.win32_getDisplayModes(deviceName, !!includeRawModes, (_, result) => {
+      resolve(Array.isArray(result) ? result : []);
+    });
+    if (!ran) {
+      reject(new Error("Could not enumerate display modes."));
+    }
+  });
+}
+
+function win32_setDisplayMode(args) {
+  return new Promise((resolve, reject) => {
+    const ran = addon.win32_setDisplayMode(args, (_, errorCode) => {
+      if (errorCode === 0) {
+        resolve();
+      } else {
+        reject(new Win32Error(errorCode));
+      }
+    });
+    if (!ran) {
+      reject(new Error("Could not apply display mode."));
+    }
+  });
+}
+
+function normalizeDeviceId(value) {
+  return String(value || "").toUpperCase().replace(/^\\\\\?\\/, "");
+}
+
+function displayRefreshRate(entry) {
+  const numerator = entry?.targetVideoSignalInfo?.vSyncFreq?.Numerator;
+  const denominator = entry?.targetVideoSignalInfo?.vSyncFreq?.Denominator;
+  if (Number.isFinite(numerator) && Number.isFinite(denominator) && denominator > 0) {
+    return numerator / denominator;
+  }
+  return undefined;
+}
+
+function normalizeDisplayMode(mode, currentMode) {
+  const refreshRate = mode.displayFrequency || undefined;
+  const isCurrent =
+    currentMode &&
+    currentMode.width === mode.width &&
+    currentMode.height === mode.height &&
+    (currentMode.displayFrequency === undefined ||
+      mode.displayFrequency === undefined ||
+      Math.abs(currentMode.displayFrequency - mode.displayFrequency) < 1);
+
+  return {
+    width: mode.width,
+    height: mode.height,
+    refreshRate,
+    refreshRateNumerator: refreshRate,
+    refreshRateDenominator: 1,
+    bitsPerPel: mode.bitsPerPel,
+    displayFrequency: mode.displayFrequency,
+    displayFlags: mode.displayFlags,
+    rawDeviceName: mode.rawDeviceName,
+    modeIndex: mode.index,
+    fields: mode.fields,
+    positionX: mode.positionX,
+    positionY: mode.positionY,
+    fixedOutput: mode.fixedOutput,
+    isCurrent,
+    isRecommended: false,
+  };
+}
+
+function displayModeKey(mode, includeAllFields = false) {
+  if (includeAllFields) {
+    return [
+      mode.width,
+      mode.height,
+      mode.displayFrequency || mode.refreshRate || 0,
+      mode.bitsPerPel || 0,
+      mode.displayFlags || 0,
+      mode.fixedOutput || 0,
+    ].join("x");
+  }
+  return [
+    mode.width,
+    mode.height,
+    mode.displayFrequency || 0,
+  ].join("x");
+}
+
+async function resolveDisplayDevice(deviceNameOrPath) {
+  const displayDevices = await win32_listDisplayDevices();
+  const normalizedTarget = normalizeDeviceId(deviceNameOrPath);
+
+  for (const displayDevice of displayDevices) {
+    if (normalizeDeviceId(displayDevice.deviceName) === normalizedTarget) {
+      return displayDevice;
+    }
+    if (normalizeDeviceId(displayDevice.deviceId) === normalizedTarget) {
+      return displayDevice;
+    }
+    for (const monitor of displayDevice.monitors || []) {
+      if (normalizeDeviceId(monitor.deviceId) === normalizedTarget) {
+        return displayDevice;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+async function findDisplayConfigEntry(deviceNameOrPath) {
+  const currentConfig = await module.exports.extractDisplayConfig();
+  const normalizedTarget = normalizeDeviceId(deviceNameOrPath);
+  let configEntry = currentConfig.find(
+    (entry) => normalizeDeviceId(entry.devicePath) === normalizedTarget
+  );
+
+  if (configEntry !== undefined) {
+    return configEntry;
+  }
+
+  const displayDevice = await resolveDisplayDevice(deviceNameOrPath);
+  if (displayDevice === undefined) {
+    return undefined;
+  }
+
+  const monitorIds = (displayDevice.monitors || []).map((monitor) =>
+    normalizeDeviceId(monitor.deviceId)
+  );
+
+  configEntry = currentConfig.find((entry) =>
+    monitorIds.indexOf(normalizeDeviceId(entry.devicePath)) >= 0
+  );
+
+  return configEntry;
+}
+
 /**
  * @typedef ConfigId
  * @type {object}
@@ -326,6 +472,116 @@ module.exports.extractDisplayConfig = async () => {
     ret.push(output);
   }
   return ret;
+};
+
+module.exports.listDisplayDevices = async () => win32_listDisplayDevices();
+
+module.exports.getCurrentDisplayMode = async ({ deviceNameOrPath }) => {
+  const configEntry = await findDisplayConfigEntry(deviceNameOrPath);
+
+  if (configEntry === undefined) {
+    throw new Error("Display not found.");
+  }
+
+  const width = configEntry.sourceMode?.width;
+  const height = configEntry.sourceMode?.height;
+  const refreshRate = displayRefreshRate(configEntry);
+
+  return {
+    width,
+    height,
+    refreshRate,
+    refreshRateNumerator: configEntry.targetVideoSignalInfo?.vSyncFreq?.Numerator,
+    refreshRateDenominator: configEntry.targetVideoSignalInfo?.vSyncFreq?.Denominator,
+    devicePath: configEntry.devicePath,
+    displayName: configEntry.displayName,
+    sourceConfigId: configEntry.sourceConfigId,
+    targetConfigId: configEntry.targetConfigId,
+  };
+};
+
+module.exports.getDisplayModes = async ({ deviceNameOrPath, includeAllModes = false }) => {
+  const displayDevice = await resolveDisplayDevice(deviceNameOrPath);
+  if (displayDevice === undefined) {
+    throw new Error("Display device mapping not found.");
+  }
+
+  const currentMode = await module.exports.getCurrentDisplayMode({ deviceNameOrPath });
+  const rawModes = await win32_getDisplayModes(displayDevice.deviceName, includeAllModes);
+  const seen = new Set();
+  const modes = [];
+
+  for (const rawMode of rawModes) {
+    const mode = normalizeDisplayMode(
+      { ...rawMode, rawDeviceName: displayDevice.deviceName },
+      {
+        width: currentMode.width,
+        height: currentMode.height,
+        displayFrequency: currentMode.refreshRate,
+      }
+    );
+    const key = displayModeKey(mode, includeAllModes);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    modes.push(mode);
+  }
+
+  modes.sort((a, b) => {
+    if (b.width !== a.width) return b.width - a.width;
+    if (b.height !== a.height) return b.height - a.height;
+    return (b.displayFrequency || 0) - (a.displayFrequency || 0);
+  });
+
+  return {
+    deviceName: displayDevice.deviceName,
+    devicePath: currentMode.devicePath,
+    currentMode,
+    modes,
+  };
+};
+
+module.exports.setDisplayMode = async ({ deviceNameOrPath, mode, persistent = false }) => {
+  const displayDevice = await resolveDisplayDevice(deviceNameOrPath);
+  if (displayDevice === undefined) {
+    throw new Error("Display device mapping not found.");
+  }
+
+  const beforeMode = await module.exports.getCurrentDisplayMode({ deviceNameOrPath });
+
+  await win32_setDisplayMode({
+    deviceName: displayDevice.deviceName,
+    width: mode.width,
+    height: mode.height,
+    bitsPerPel: mode.bitsPerPel,
+    displayFrequency: mode.displayFrequency || mode.refreshRate,
+    displayFlags: mode.displayFlags,
+    fixedOutput: mode.fixedOutput,
+    persistent,
+  });
+
+  const afterMode = await module.exports.getCurrentDisplayMode({ deviceNameOrPath });
+  const expectedFrequency = mode.displayFrequency || mode.refreshRate;
+  const frequencyMatches =
+    expectedFrequency === undefined ||
+    afterMode.refreshRate === undefined ||
+    Math.abs(afterMode.refreshRate - expectedFrequency) < 1;
+
+  if (
+    afterMode.width !== mode.width ||
+    afterMode.height !== mode.height ||
+    !frequencyMatches
+  ) {
+    throw new Error("Display mode was applied but target verification failed.");
+  }
+
+  return {
+    deviceName: displayDevice.deviceName,
+    devicePath: afterMode.devicePath,
+    beforeMode,
+    afterMode,
+  };
 };
 
 async function win32_toggleEnabledDisplays(args) {

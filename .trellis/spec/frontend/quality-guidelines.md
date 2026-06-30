@@ -40,7 +40,12 @@ Questions to answer:
 
 <!-- What level of testing is expected -->
 
-(To be filled by the team)
+### Electron Native Dependency Packaging
+
+Follow [Electron Packaging Guidelines](./electron-packaging.md) before shipping
+any installer that includes local or native Node dependencies. Native rebuild
+success is not enough; the installed app must contain both the dependency's
+JavaScript `package.json.main` entry and the native `.node` binary.
 
 ---
 

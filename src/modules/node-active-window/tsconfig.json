@@ -13,8 +13,7 @@
 		"esModuleInterop": true,
 		"moduleResolution": "node",
 		"isolatedModules": true,
-		"declaration": true,
-		"typeRoots": ["./typings", "./node_modules/@types"]
+		"declaration": true
 	},
 	"include": ["src", "demo"]
 }

@@ -1130,6 +1130,14 @@ export default class SettingsWindow extends PureComponent {
         window.sendSettings(newState)
     }
 
+    setNumberSetting = (setting, sentVal, min, max) => {
+        let value = parseInt(sentVal)
+        if (Number.isNaN(value)) value = min
+        if (min !== undefined) value = Math.max(min, value)
+        if (max !== undefined) value = Math.min(max, value)
+        this.setSetting(setting, value)
+    }
+
     renderToggle = (setting, showText = true, textSide = "right", inverse = false) => {
         const isActive = (this.state.rawSettings?.[setting] ? true : false)
         const isVisiblyActive = (inverse ? !isActive : isActive)
@@ -1363,6 +1371,19 @@ export default class SettingsWindow extends PureComponent {
                                     <SettingsOption title={T.t("SETTINGS_MONITORS_SDR_SLIDER_TITLE")} description={T.t("SETTINGS_MONITORS_SDR_SLIDER_DESCRIPTION")} expandable={true}>
                                         {this.getSDRMonitorsSettings()}
                                     </SettingsOption>
+                                </div>
+
+                                <div className="pageSection">
+                                    <div className="sectionTitle">{T.t("SETTINGS_RESOLUTION_TITLE")}</div>
+                                    <p>{T.t("SETTINGS_RESOLUTION_DESC")}</p>
+                                    <SettingsOption title={T.t("SETTINGS_RESOLUTION_ENABLE_TITLE")} description={T.t("SETTINGS_RESOLUTION_ENABLE_DESC")} input={this.renderToggle("resolutionControlsEnabled")} />
+                                    <SettingsOption title={T.t("SETTINGS_RESOLUTION_SHOW_REFRESH_TITLE")} description={T.t("SETTINGS_RESOLUTION_SHOW_REFRESH_DESC")} input={this.renderToggle("resolutionShowRefreshRate")} />
+                                    <SettingsOption title={T.t("SETTINGS_RESOLUTION_HIDE_LOW_REFRESH_TITLE")} description={T.t("SETTINGS_RESOLUTION_HIDE_LOW_REFRESH_DESC")} input={this.renderToggle("resolutionHideLowRefreshRates")} />
+                                    <SettingsOption title={T.t("SETTINGS_RESOLUTION_ONLY_FAVORITES_TITLE")} description={T.t("SETTINGS_RESOLUTION_ONLY_FAVORITES_DESC")} input={this.renderToggle("resolutionShowOnlyFavorites")} />
+                                    <SettingsOption title={T.t("SETTINGS_RESOLUTION_SHOW_ALL_TITLE")} description={T.t("SETTINGS_RESOLUTION_SHOW_ALL_DESC")} input={this.renderToggle("resolutionShowAllModes")} />
+                                    <SettingsOption title={T.t("SETTINGS_RESOLUTION_REVERT_TIMEOUT_TITLE")} description={T.t("SETTINGS_RESOLUTION_REVERT_TIMEOUT_DESC")} input={
+                                        <input type="number" min="5" max="60" value={this.state.rawSettings.resolutionRevertTimeoutSeconds * 1} onChange={(e) => this.setNumberSetting("resolutionRevertTimeoutSeconds", e.target.value, 5, 60)} />
+                                    } />
                                 </div>
 
                                 <div className="pageSection">
@@ -1733,7 +1754,78 @@ function SettingsPage(props) {
 
 function ActionItem(props) {
     const { action, monitors, monitorNames } = props
-    const showDisplaysList = (action.type != "off" && action.type != "refresh")
+    const showDisplaysList = (action.type != "off" && action.type != "refresh" && action.type != "resolution")
+
+    const getResolutionDisplayKey = (monitor) => monitor?.resolutionDisplayKey || monitor?.win32DevicePath || monitor?.key
+
+    const getResolutionFavoriteKey = (favorite) => {
+        if (!favorite) return ""
+        if (typeof favorite === "string") return favorite
+        if (!favorite.width || !favorite.height) return ""
+        const baseKey = favorite?.key || `${favorite?.width}x${favorite?.height}@${Math.round((favorite?.refreshRate ?? favorite?.displayFrequency ?? 0) * 100) / 100}`
+        return [
+            baseKey,
+            favorite.bitsPerPel ?? "",
+            favorite.displayFlags ?? "",
+            favorite.fixedOutput ?? ""
+        ].join("|")
+    }
+
+    const formatResolutionFavoriteLabel = (favorite) => {
+        const favoriteKey = getResolutionFavoriteKey(favorite)
+        const [shortKey] = `${favoriteKey}`.split("|")
+        const [size, refreshRate] = shortKey.split("@")
+        const hz = parseFloat(refreshRate)
+        return `${size}${hz ? ` · ${Math.round(hz * 100) / 100}Hz` : ""}`
+    }
+
+    const resolveResolutionFavoriteSelectValue = (favorites, savedKey) => {
+        if (!savedKey) return getResolutionFavoriteKey(favorites[0]) || ""
+        const exactFavorite = favorites.find(favorite => getResolutionFavoriteKey(favorite) === savedKey)
+        if (exactFavorite) return savedKey
+        const shortFavorite = favorites.find(favorite => `${getResolutionFavoriteKey(favorite)}`.split("|")[0] === savedKey)
+        return shortFavorite ? getResolutionFavoriteKey(shortFavorite) : savedKey
+    }
+
+    const getResolutionHotkeyInput = () => {
+        const displays = Object.values(monitors || {}).filter(monitor => getResolutionDisplayKey(monitor))
+        const currentDisplayKey = action.resolutionDisplayKey || getResolutionDisplayKey(displays[0])
+        const favorites = window.settings?.resolutionFavorites?.[currentDisplayKey] || []
+        const currentFavoriteKey = resolveResolutionFavoriteSelectValue(favorites, action.resolutionFavoriteKey)
+
+        return (
+            <>
+                <div className="input-row hotkey-action-resolution">
+                    <div className="field">
+                        <label>{T.t("SETTINGS_HOTKEY_RESOLUTION_DISPLAY")}</label>
+                        <select value={currentDisplayKey || ""} onChange={e => {
+                            action.resolutionDisplayKey = e.target.value
+                            const nextFavorites = window.settings?.resolutionFavorites?.[action.resolutionDisplayKey] || []
+                            action.resolutionFavoriteKey = getResolutionFavoriteKey(nextFavorites[0]) || ""
+                            props.onChange?.(action)
+                        }}>
+                            {displays.map(monitor => (
+                                <option key={getResolutionDisplayKey(monitor)} value={getResolutionDisplayKey(monitor)}>{getMonitorName(monitor, monitorNames)}</option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
+                <div className="input-row hotkey-action-resolution">
+                    <div className="field">
+                        <label>{T.t("SETTINGS_HOTKEY_RESOLUTION_MODE")}</label>
+                        <select value={currentFavoriteKey} onChange={e => {
+                            action.resolutionFavoriteKey = e.target.value
+                            props.onChange?.(action)
+                        }}>
+                            {favorites.length ? favorites.map(favorite => (
+                                <option key={getResolutionFavoriteKey(favorite)} value={getResolutionFavoriteKey(favorite)}>{formatResolutionFavoriteLabel(favorite)}</option>
+                            )) : <option value="">{T.t("SETTINGS_HOTKEY_RESOLUTION_NO_FAVORITES")}</option>}
+                        </select>
+                    </div>
+                </div>
+            </>
+        )
+    }
 
     const getHotkeyMonitors = () => {
         try {
@@ -1766,6 +1858,8 @@ function ActionItem(props) {
             return (<div className="input-row"><p style={{lineHeight: 1.2}}>{T.t("SETTINGS_HOTKEY_OFF_WARN")}</p></div>)
         } else if (action.type === "refresh") {
             return null
+        } else if (action.type === "resolution") {
+            return getResolutionHotkeyInput()
         } else {
             let selectBoxValue = action.target
             if (!(selectBoxValue === "brightness" || selectBoxValue === "sdr" || selectBoxValue === "contrast" || selectBoxValue === "volume" || selectBoxValue === "powerState")) {
@@ -1882,11 +1976,22 @@ function ActionItem(props) {
                             <label>{T.t("SETTINGS_HOTKEY_ACTION")}</label>
                             <select value={action.type} onChange={e => {
                                 action.type = e.target.value
+                                if (action.type === "resolution") {
+                                    action.target = "resolution"
+                                    if (!action.resolutionDisplayKey) {
+                                        const displays = Object.values(monitors || {}).filter(monitor => getResolutionDisplayKey(monitor))
+                                        action.resolutionDisplayKey = getResolutionDisplayKey(displays[0]) || ""
+                                        action.resolutionFavoriteKey = getResolutionFavoriteKey((window.settings?.resolutionFavorites?.[action.resolutionDisplayKey] || [])[0]) || ""
+                                    }
+                                } else if (action.target === "resolution") {
+                                    action.target = "brightness"
+                                }
                                 props.onChange?.(action)
                             }}>
                                 <option value="set">{T.t("SETTINGS_HOTKEY_ACTION_SET")}</option>
                                 <option value="offset">{T.t("SETTINGS_HOTKEY_ACTION_OFFSET")}</option>
                                 <option value="cycle">{T.t("SETTINGS_HOTKEY_ACTION_CYCLE")}</option>
+                                <option value="resolution">{T.t("SETTINGS_HOTKEY_ACTION_RESOLUTION")}</option>
                                 <option value="off">{T.t("PANEL_BUTTON_TURN_OFF_DISPLAYS")}</option>
                                 <option value="refresh">{T.t("GENERIC_REFRESH_DISPLAYS")}</option>
                             </select>

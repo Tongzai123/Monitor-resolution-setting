@@ -79,6 +79,51 @@ function requestMonitors() {
     ipc.send('request-monitors')
 }
 
+function createRequestId(prefix) {
+    return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+function createResolutionRequest(channel, payload, responseChannel) {
+    return new Promise((resolve, reject) => {
+        const requestId = createRequestId(channel)
+        const timeout = setTimeout(() => {
+            ipc.removeListener(responseChannel, handler)
+            reject({ message: "Resolution request timed out." })
+        }, 10000)
+        const handler = (event, data) => {
+            if (data.requestId !== requestId) return
+            clearTimeout(timeout)
+            ipc.removeListener(responseChannel, handler)
+            if (data.error) {
+                reject(data.error)
+            } else {
+                resolve(data)
+            }
+        }
+        ipc.on(responseChannel, handler)
+        ipc.send(channel, { requestId, ...payload })
+    })
+}
+
+window.resolution = {
+    listModes(displayKey) {
+        return createResolutionRequest('resolution:list-modes', { displayKey }, 'resolution:modes')
+            .then(data => data.result)
+    },
+    applyMode(displayKey, mode) {
+        return createResolutionRequest('resolution:apply-mode', { displayKey, mode }, 'resolution:apply-result')
+    },
+    confirmChange(id) {
+        return createResolutionRequest('resolution:confirm-change', { id }, 'resolution:confirm-result')
+    },
+    revertChange(id) {
+        return createResolutionRequest('resolution:revert-change', { id }, 'resolution:revert-result')
+    },
+    requestPendingChange() {
+        ipc.send('resolution:request-pending-change')
+    }
+}
+
 function requestAccent() {
     ipc.send('request-colors')
 }
@@ -214,6 +259,19 @@ ipc.on("monitors-updated", (e, monitors) => {
 ipc.on("force-refresh-monitors", (e) => {
     window.allMonitors = {}
     ipc.send('full-refresh', true)
+})
+
+ipc.on("resolution:pending-change", (e, pending) => {
+    window.pendingResolutionChange = pending
+    window.dispatchEvent(new CustomEvent('resolutionPendingChange', {
+        detail: pending
+    }))
+})
+
+ipc.on("resolution:error", (e, error) => {
+    window.dispatchEvent(new CustomEvent('resolutionError', {
+        detail: error
+    }))
 })
 
 // Accent colors recieved

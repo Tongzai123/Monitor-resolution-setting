@@ -168,6 +168,7 @@
     "nsis": {
       "deleteAppDataOnUninstall": true,
       "include": "resources/nsis/installer.nsh",
+      "runAfterFinish": false,
       "warningsAsErrors": false
     }
   },

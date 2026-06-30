@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <memory>
+#include <string>
 #include <vector>
 
 const int DEVICE_NAME_SIZE = 64;   // 64 comes from DISPLAYCONFIG_TARGET_DEVICE_NAME.monitorFriendlyDeviceName
@@ -62,6 +63,51 @@ struct Win32RestoreDisplayConfigDevice {
     DISPLAYCONFIG_PATH_INFO pathInfo;
     DISPLAYCONFIG_MODE_INFO sourceModeInfo;
     DISPLAYCONFIG_MODE_INFO targetModeInfo;
+};
+
+struct Win32MonitorDeviceInfo {
+    std::wstring deviceName;
+    std::wstring deviceString;
+    std::wstring deviceId;
+    std::wstring deviceKey;
+    DWORD stateFlags;
+};
+
+struct Win32DisplayDeviceInfo {
+    std::wstring deviceName;
+    std::wstring deviceString;
+    std::wstring deviceId;
+    std::wstring deviceKey;
+    DWORD stateFlags;
+    std::vector<struct Win32MonitorDeviceInfo> monitors;
+};
+
+struct Win32DisplayModeInfo {
+    DWORD index;
+    DWORD fields;
+    DWORD width;
+    DWORD height;
+    DWORD bitsPerPel;
+    DWORD displayFrequency;
+    DWORD displayFlags;
+    LONG positionX;
+    LONG positionY;
+    DWORD fixedOutput;
+};
+
+struct Win32SetDisplayModeArgs {
+    std::wstring deviceName;
+    DWORD width;
+    DWORD height;
+    DWORD bitsPerPel;
+    DWORD displayFrequency;
+    DWORD displayFlags;
+    DWORD fixedOutput;
+    BOOL hasBitsPerPel;
+    BOOL hasDisplayFrequency;
+    BOOL hasDisplayFlags;
+    BOOL hasFixedOutput;
+    BOOL persistent;
 };
 
 DWORD RunDisplayChangeContextLoop(LPVOID lpParam);
@@ -208,6 +254,125 @@ bool AlreadyHasNameInfo(const std::vector<struct Win32DeviceNameInfo> &rgNameInf
         return true;
     }
     return false;
+}
+
+std::wstring NapiStringToWString(Napi::Value value) {
+    auto utf16 = value.As<Napi::String>().Utf16Value();
+    return std::wstring(reinterpret_cast<const wchar_t *>(utf16.c_str()), utf16.length());
+}
+
+std::vector<struct Win32DisplayDeviceInfo> ListDisplayDevices() {
+    std::vector<struct Win32DisplayDeviceInfo> ret;
+    DWORD deviceIndex = 0;
+    DISPLAY_DEVICEW displayDevice;
+
+    ZeroMemory(&displayDevice, sizeof(displayDevice));
+    displayDevice.cb = sizeof(displayDevice);
+
+    while (EnumDisplayDevicesW(NULL, deviceIndex, &displayDevice, 0)) {
+        struct Win32DisplayDeviceInfo displayInfo;
+        displayInfo.deviceName = displayDevice.DeviceName;
+        displayInfo.deviceString = displayDevice.DeviceString;
+        displayInfo.deviceId = displayDevice.DeviceID;
+        displayInfo.deviceKey = displayDevice.DeviceKey;
+        displayInfo.stateFlags = displayDevice.StateFlags;
+
+        DWORD monitorIndex = 0;
+        DISPLAY_DEVICEW monitorDevice;
+        ZeroMemory(&monitorDevice, sizeof(monitorDevice));
+        monitorDevice.cb = sizeof(monitorDevice);
+
+        while (EnumDisplayDevicesW(displayDevice.DeviceName, monitorIndex, &monitorDevice, EDD_GET_DEVICE_INTERFACE_NAME)) {
+            struct Win32MonitorDeviceInfo monitorInfo;
+            monitorInfo.deviceName = monitorDevice.DeviceName;
+            monitorInfo.deviceString = monitorDevice.DeviceString;
+            monitorInfo.deviceId = monitorDevice.DeviceID;
+            monitorInfo.deviceKey = monitorDevice.DeviceKey;
+            monitorInfo.stateFlags = monitorDevice.StateFlags;
+            displayInfo.monitors.push_back(monitorInfo);
+
+            monitorIndex++;
+            ZeroMemory(&monitorDevice, sizeof(monitorDevice));
+            monitorDevice.cb = sizeof(monitorDevice);
+        }
+
+        ret.push_back(displayInfo);
+
+        deviceIndex++;
+        ZeroMemory(&displayDevice, sizeof(displayDevice));
+        displayDevice.cb = sizeof(displayDevice);
+    }
+
+    return ret;
+}
+
+std::vector<struct Win32DisplayModeInfo> GetDisplayModes(const std::wstring &deviceName, bool includeRawModes) {
+    std::vector<struct Win32DisplayModeInfo> ret;
+    DWORD modeIndex = 0;
+    DWORD flags = includeRawModes ? EDS_RAWMODE : 0;
+    DEVMODEW devMode;
+
+    ZeroMemory(&devMode, sizeof(devMode));
+    devMode.dmSize = sizeof(devMode);
+
+    while (EnumDisplaySettingsExW(deviceName.c_str(), modeIndex, &devMode, flags)) {
+        struct Win32DisplayModeInfo modeInfo;
+        modeInfo.index = modeIndex;
+        modeInfo.fields = devMode.dmFields;
+        modeInfo.width = devMode.dmPelsWidth;
+        modeInfo.height = devMode.dmPelsHeight;
+        modeInfo.bitsPerPel = devMode.dmBitsPerPel;
+        modeInfo.displayFrequency = devMode.dmDisplayFrequency;
+        modeInfo.displayFlags = devMode.dmDisplayFlags;
+        modeInfo.positionX = devMode.dmPosition.x;
+        modeInfo.positionY = devMode.dmPosition.y;
+        modeInfo.fixedOutput = devMode.dmDisplayFixedOutput;
+        ret.push_back(modeInfo);
+
+        modeIndex++;
+        ZeroMemory(&devMode, sizeof(devMode));
+        devMode.dmSize = sizeof(devMode);
+    }
+
+    return ret;
+}
+
+LONG SetDisplayMode(const struct Win32SetDisplayModeArgs &args) {
+    DEVMODEW devMode;
+    ZeroMemory(&devMode, sizeof(devMode));
+    devMode.dmSize = sizeof(devMode);
+
+    if (!EnumDisplaySettingsExW(args.deviceName.c_str(), ENUM_CURRENT_SETTINGS, &devMode, 0)) {
+        return DISP_CHANGE_BADPARAM;
+    }
+
+    devMode.dmPelsWidth = args.width;
+    devMode.dmPelsHeight = args.height;
+    devMode.dmFields |= DM_PELSWIDTH | DM_PELSHEIGHT;
+
+    if (args.hasBitsPerPel) {
+        devMode.dmBitsPerPel = args.bitsPerPel;
+        devMode.dmFields |= DM_BITSPERPEL;
+    }
+    if (args.hasDisplayFrequency) {
+        devMode.dmDisplayFrequency = args.displayFrequency;
+        devMode.dmFields |= DM_DISPLAYFREQUENCY;
+    }
+    if (args.hasDisplayFlags) {
+        devMode.dmDisplayFlags = args.displayFlags;
+        devMode.dmFields |= DM_DISPLAYFLAGS;
+    }
+    if (args.hasFixedOutput) {
+        devMode.dmDisplayFixedOutput = args.fixedOutput;
+        devMode.dmFields |= DM_DISPLAYFIXEDOUTPUT;
+    }
+
+    DWORD flags = 0;
+    if (args.persistent) {
+        flags |= CDS_UPDATEREGISTRY;
+    }
+
+    return ChangeDisplaySettingsExW(args.deviceName.c_str(), &devMode, NULL, flags, NULL);
 }
 
 void AcquireDeviceNames(std::shared_ptr<struct Win32QueryDisplayConfigResults> configResults) {
@@ -738,6 +903,66 @@ Napi::Object ConvertNameInfo(Napi::Env env, const struct Win32DeviceNameInfo &na
     return result;
 }
 
+Napi::Object ConvertMonitorDeviceInfo(Napi::Env env, const struct Win32MonitorDeviceInfo &monitorInfo) {
+    auto result = Napi::Object::New(env);
+    result.Set("deviceName", Napi::String::New(env, (const char16_t *)monitorInfo.deviceName.c_str(), monitorInfo.deviceName.length()));
+    result.Set("deviceString", Napi::String::New(env, (const char16_t *)monitorInfo.deviceString.c_str(), monitorInfo.deviceString.length()));
+    result.Set("deviceId", Napi::String::New(env, (const char16_t *)monitorInfo.deviceId.c_str(), monitorInfo.deviceId.length()));
+    result.Set("deviceKey", Napi::String::New(env, (const char16_t *)monitorInfo.deviceKey.c_str(), monitorInfo.deviceKey.length()));
+    result.Set("stateFlags", (double)monitorInfo.stateFlags);
+    return result;
+}
+
+Napi::Array ConvertMonitorDeviceInfoArray(Napi::Env env, const std::vector<struct Win32MonitorDeviceInfo> &monitors) {
+    auto result = Napi::Array::New(env, monitors.size());
+    for (int i = 0; i < monitors.size(); i++) {
+        result.Set(i, ConvertMonitorDeviceInfo(env, monitors[i]));
+    }
+    return result;
+}
+
+Napi::Object ConvertDisplayDeviceInfo(Napi::Env env, const struct Win32DisplayDeviceInfo &displayInfo) {
+    auto result = Napi::Object::New(env);
+    result.Set("deviceName", Napi::String::New(env, (const char16_t *)displayInfo.deviceName.c_str(), displayInfo.deviceName.length()));
+    result.Set("deviceString", Napi::String::New(env, (const char16_t *)displayInfo.deviceString.c_str(), displayInfo.deviceString.length()));
+    result.Set("deviceId", Napi::String::New(env, (const char16_t *)displayInfo.deviceId.c_str(), displayInfo.deviceId.length()));
+    result.Set("deviceKey", Napi::String::New(env, (const char16_t *)displayInfo.deviceKey.c_str(), displayInfo.deviceKey.length()));
+    result.Set("stateFlags", (double)displayInfo.stateFlags);
+    result.Set("monitors", ConvertMonitorDeviceInfoArray(env, displayInfo.monitors));
+    return result;
+}
+
+Napi::Array ConvertDisplayDeviceInfoArray(Napi::Env env, const std::vector<struct Win32DisplayDeviceInfo> &devices) {
+    auto result = Napi::Array::New(env, devices.size());
+    for (int i = 0; i < devices.size(); i++) {
+        result.Set(i, ConvertDisplayDeviceInfo(env, devices[i]));
+    }
+    return result;
+}
+
+Napi::Object ConvertDisplayModeInfo(Napi::Env env, const struct Win32DisplayModeInfo &modeInfo) {
+    auto result = Napi::Object::New(env);
+    result.Set("index", (double)modeInfo.index);
+    result.Set("fields", (double)modeInfo.fields);
+    result.Set("width", (double)modeInfo.width);
+    result.Set("height", (double)modeInfo.height);
+    result.Set("bitsPerPel", (double)modeInfo.bitsPerPel);
+    result.Set("displayFrequency", (double)modeInfo.displayFrequency);
+    result.Set("displayFlags", (double)modeInfo.displayFlags);
+    result.Set("positionX", (double)modeInfo.positionX);
+    result.Set("positionY", (double)modeInfo.positionY);
+    result.Set("fixedOutput", (double)modeInfo.fixedOutput);
+    return result;
+}
+
+Napi::Array ConvertDisplayModeInfoArray(Napi::Env env, const std::vector<struct Win32DisplayModeInfo> &modes) {
+    auto result = Napi::Array::New(env, modes.size());
+    for (int i = 0; i < modes.size(); i++) {
+        result.Set(i, ConvertDisplayModeInfo(env, modes[i]));
+    }
+    return result;
+}
+
 Napi::Array ConvertPathsInfo(Napi::Env env, const std::vector<DISPLAYCONFIG_PATH_INFO> &rgPathInfo) {
     auto result = Napi::Array::New(env, rgPathInfo.size());
     auto data = rgPathInfo.data();
@@ -815,6 +1040,156 @@ Napi::Value Win32QueryDisplayConfig(const Napi::CallbackInfo &info) {
 
     auto callback = info[0].As<Napi::Function>();
     auto worker = new Win32QueryDisplayConfigWorker(callback);
+    worker->Queue();
+    return Napi::Boolean::New(info.Env(), true);
+}
+
+class Win32ListDisplayDevicesWorker : public Napi::AsyncWorker {
+   public:
+    Win32ListDisplayDevicesWorker(Napi::Function &callback) : Napi::AsyncWorker(callback), devices() {}
+
+    void Execute() {
+        this->devices = ListDisplayDevices();
+    }
+
+    std::vector<napi_value> GetResult(Napi::Env env) {
+        std::vector<napi_value> result{env.Null(), ConvertDisplayDeviceInfoArray(env, this->devices)};
+        return result;
+    }
+
+   private:
+    std::vector<struct Win32DisplayDeviceInfo> devices;
+};
+
+Napi::Value Win32ListDisplayDevices(const Napi::CallbackInfo &info) {
+    if (info.Length() < 1 || !info[0].IsFunction()) {
+        return Napi::Boolean::New(info.Env(), false);
+    }
+
+    auto callback = info[0].As<Napi::Function>();
+    auto worker = new Win32ListDisplayDevicesWorker(callback);
+    worker->Queue();
+    return Napi::Boolean::New(info.Env(), true);
+}
+
+class Win32GetDisplayModesWorker : public Napi::AsyncWorker {
+   public:
+    Win32GetDisplayModesWorker(Napi::Function &callback, std::wstring deviceName, bool includeRawModes)
+        : Napi::AsyncWorker(callback), deviceName(deviceName), includeRawModes(includeRawModes), modes() {}
+
+    void Execute() {
+        this->modes = GetDisplayModes(this->deviceName, this->includeRawModes);
+    }
+
+    std::vector<napi_value> GetResult(Napi::Env env) {
+        std::vector<napi_value> result{env.Null(), ConvertDisplayModeInfoArray(env, this->modes)};
+        return result;
+    }
+
+   private:
+    std::wstring deviceName;
+    bool includeRawModes;
+    std::vector<struct Win32DisplayModeInfo> modes;
+};
+
+Napi::Value Win32GetDisplayModes(const Napi::CallbackInfo &info) {
+    if (info.Length() < 3 || !info[0].IsString() || !info[1].IsBoolean() || !info[2].IsFunction()) {
+        return Napi::Boolean::New(info.Env(), false);
+    }
+
+    auto deviceName = NapiStringToWString(info[0]);
+    auto includeRawModes = (bool)info[1].ToBoolean();
+    auto callback = info[2].As<Napi::Function>();
+    auto worker = new Win32GetDisplayModesWorker(callback, deviceName, includeRawModes);
+    worker->Queue();
+    return Napi::Boolean::New(info.Env(), true);
+}
+
+BOOL ExtractSetDisplayModeArgs(Napi::Object obj, struct Win32SetDisplayModeArgs *receiver) {
+    auto deviceNameVal = obj.Get("deviceName");
+    auto widthVal = obj.Get("width");
+    auto heightVal = obj.Get("height");
+
+    if (!deviceNameVal.IsString() || !widthVal.IsNumber() || !heightVal.IsNumber()) {
+        return false;
+    }
+
+    receiver->deviceName = NapiStringToWString(deviceNameVal);
+    receiver->width = widthVal.As<Napi::Number>().Uint32Value();
+    receiver->height = heightVal.As<Napi::Number>().Uint32Value();
+    receiver->bitsPerPel = 0;
+    receiver->displayFrequency = 0;
+    receiver->displayFlags = 0;
+    receiver->fixedOutput = 0;
+    receiver->hasBitsPerPel = false;
+    receiver->hasDisplayFrequency = false;
+    receiver->hasDisplayFlags = false;
+    receiver->hasFixedOutput = false;
+    receiver->persistent = false;
+
+    auto bitsPerPelVal = obj.Get("bitsPerPel");
+    if (bitsPerPelVal.IsNumber()) {
+        receiver->bitsPerPel = bitsPerPelVal.As<Napi::Number>().Uint32Value();
+        receiver->hasBitsPerPel = true;
+    }
+
+    auto displayFrequencyVal = obj.Get("displayFrequency");
+    if (displayFrequencyVal.IsNumber()) {
+        receiver->displayFrequency = displayFrequencyVal.As<Napi::Number>().Uint32Value();
+        receiver->hasDisplayFrequency = true;
+    }
+
+    auto displayFlagsVal = obj.Get("displayFlags");
+    if (displayFlagsVal.IsNumber()) {
+        receiver->displayFlags = displayFlagsVal.As<Napi::Number>().Uint32Value();
+        receiver->hasDisplayFlags = true;
+    }
+
+    auto fixedOutputVal = obj.Get("fixedOutput");
+    if (fixedOutputVal.IsNumber()) {
+        receiver->fixedOutput = fixedOutputVal.As<Napi::Number>().Uint32Value();
+        receiver->hasFixedOutput = true;
+    }
+
+    auto persistentVal = obj.Get("persistent");
+    if (!persistentVal.IsUndefined() && !persistentVal.IsNull()) {
+        receiver->persistent = (bool)persistentVal.ToBoolean();
+    }
+
+    return true;
+}
+
+class Win32SetDisplayModeWorker : public Napi::AsyncWorker {
+   public:
+    Win32SetDisplayModeWorker(Napi::Function &callback, struct Win32SetDisplayModeArgs args)
+        : Napi::AsyncWorker(callback), args(args) {}
+
+    void Execute() {
+        this->errorCode = SetDisplayMode(this->args);
+    }
+
+    std::vector<napi_value> GetResult(Napi::Env env) {
+        std::vector<napi_value> result{env.Null(), Napi::Number::New(env, (double)this->errorCode)};
+        return result;
+    }
+
+   private:
+    struct Win32SetDisplayModeArgs args;
+    LONG errorCode;
+};
+
+Napi::Value Win32SetDisplayMode(const Napi::CallbackInfo &info) {
+    if (info.Length() < 2 || !info[0].IsObject() || !info[1].IsFunction()) {
+        return Napi::Boolean::New(info.Env(), false);
+    }
+
+    struct Win32SetDisplayModeArgs args;
+    if (!ExtractSetDisplayModeArgs(info[0].As<Napi::Object>(), &args)) {
+        return Napi::Boolean::New(info.Env(), false);
+    }
+
+    auto callback = info[1].As<Napi::Function>();
+    auto worker = new Win32SetDisplayModeWorker(callback, args);
     worker->Queue();
     return Napi::Boolean::New(info.Env(), true);
 }
@@ -1034,6 +1409,9 @@ Napi::Value Win32StopListeningForDisplayChanges(const Napi::CallbackInfo &info) 
 
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
     exports.Set("win32_queryDisplayConfig", Napi::Function::New(env, Win32QueryDisplayConfig));
+    exports.Set("win32_listDisplayDevices", Napi::Function::New(env, Win32ListDisplayDevices));
+    exports.Set("win32_getDisplayModes", Napi::Function::New(env, Win32GetDisplayModes));
+    exports.Set("win32_setDisplayMode", Napi::Function::New(env, Win32SetDisplayMode));
     exports.Set("win32_toggleEnabledDisplays", Napi::Function::New(env, Win32ToggleEnabledDisplays));
     exports.Set("win32_restoreDisplayConfig", Napi::Function::New(env, Win32RestoreDisplayConfig));
 

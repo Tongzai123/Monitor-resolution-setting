@@ -725,6 +725,21 @@ getMonitorsWMI = () => {
 }
 
 let win32Failed = false
+function getWin32RefreshRate(monitor) {
+    const numerator = monitor?.targetVideoSignalInfo?.vSyncFreq?.Numerator
+    const denominator = monitor?.targetVideoSignalInfo?.vSyncFreq?.Denominator
+    if (Number.isFinite(numerator) && Number.isFinite(denominator) && denominator > 0) {
+        return numerator / denominator
+    }
+    return undefined
+}
+
+function getResolutionDisplayKey(monitor, hwid) {
+    if (monitor.devicePath) return monitor.devicePath
+    if (hwid?.[1] && hwid?.[2]) return `${hwid[1]}#${hwid[2]}`
+    return hwid?.[2]
+}
+
 getMonitorsWin32 = () => {
     let foundDisplays = {}
     return new Promise(async (resolve, reject) => {
@@ -751,9 +766,19 @@ getMonitorsWin32 = () => {
                     key: hwid[2],
                     connector: monitor.outputTechnology,
                     hwid: hwid,
+                    resolutionDisplayKey: getResolutionDisplayKey(monitor, hwid),
+                    win32DevicePath: monitor.devicePath,
                     sourceID: monitor.sourceConfigId?.id,
+                    targetID: monitor.targetConfigId?.id,
                     scaling: monitor.scaling,
-                    bounds: monitor.sourceMode
+                    bounds: monitor.sourceMode,
+                    resolution: {
+                        width: monitor.sourceMode?.width,
+                        height: monitor.sourceMode?.height,
+                        refreshRate: getWin32RefreshRate(monitor),
+                        refreshRateNumerator: monitor.targetVideoSignalInfo?.vSyncFreq?.Numerator,
+                        refreshRateDenominator: monitor.targetVideoSignalInfo?.vSyncFreq?.Denominator
+                    }
                 }
                 if (monitor.displayName?.length > 0) {
                     win32Info.name = monitor.displayName;

@@ -344,7 +344,7 @@ body[data-is-win11="false"] #root {
             white-space: nowrap;
         }
 
-        .updateBar, .feature-power-icon, .feature-icon, .feature-row + .feature-row, .monitor-sliders.extended + .monitor-sliders.extended:before {
+        .updateBar, .feature-power-icon, .feature-icon, .resolution-control, .resolution-linked-row, .feature-row + .feature-row, .monitor-sliders.extended + .monitor-sliders.extended:before {
             display: none;
         }
 
@@ -453,6 +453,199 @@ body[data-is-win11="false"] #root {
         margin-right: 6px !important;
         margin-left: -1px !important;
         font-family: "Segoe MDL2 Assets", "Segoe Fluent Icons"; // Old icon works better at small sizes
+    }
+}
+
+.resolution-control {
+    width: 100%;
+    box-sizing: border-box;
+    margin: -2px 0 12px 0;
+    color: var(--tray-text);
+    font-size: 12.5px;
+}
+
+.resolution-feature-row {
+    align-items: flex-start;
+    height: auto;
+    margin-top: -4px;
+    padding-bottom: 10px;
+
+    .resolution-control {
+        flex: 1;
+        margin: 0;
+    }
+}
+
+.resolution-linked-row {
+    margin: -4px 0 12px 0;
+
+    .resolution-linked-name {
+        max-width: 100%;
+        margin: 0 2px 4px 2px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 11.5px;
+        opacity: 0.72;
+    }
+
+    .resolution-control {
+        margin-bottom: 0;
+    }
+}
+
+.resolution-segment {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 34px;
+    width: 100%;
+    min-height: 30px;
+    border: 1px solid color-mix(in srgb, var(--tray-text) 16%, transparent);
+    border-radius: 6px;
+    overflow: hidden;
+    background: color-mix(in srgb, var(--tray-text) 6%, transparent);
+}
+
+.resolution-current,
+.resolution-expand,
+.resolution-mode-item,
+.resolution-pending-bar button {
+    border: 0;
+    color: var(--tray-text);
+    font: inherit;
+    background: transparent;
+}
+
+.resolution-current,
+.resolution-expand {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    cursor: pointer;
+
+    &:hover {
+        background: color-mix(in srgb, var(--tray-text) 10%, transparent);
+    }
+}
+
+.resolution-current {
+    gap: 8px;
+    justify-content: flex-start;
+    padding: 0 9px;
+}
+
+.resolution-icon,
+.resolution-expand span,
+.resolution-mode-check,
+.resolution-mode-favorite {
+    font-family: "Segoe MDL2 Assets", "Segoe Fluent Icons";
+}
+
+.resolution-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.resolution-expand {
+    justify-content: center;
+    border-left: 1px solid color-mix(in srgb, var(--tray-text) 12%, transparent);
+}
+
+.resolution-mode-list {
+    max-height: 185px;
+    overflow-y: auto;
+    margin-top: 6px;
+    border-radius: 6px;
+    border: 1px solid color-mix(in srgb, var(--tray-text) 14%, transparent);
+    background: color-mix(in srgb, var(--tray-background) 92%, black);
+}
+
+.resolution-mode-group-title,
+.resolution-mode-empty,
+.resolution-mode-error,
+.resolution-error {
+    padding: 7px 9px;
+}
+
+.resolution-mode-group-title {
+    opacity: 0.7;
+    font-size: 11.5px;
+}
+
+.resolution-mode-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    min-height: 30px;
+    padding: 0 9px;
+    cursor: pointer;
+    text-align: left;
+
+    & > span:first-child {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    &:hover {
+        background: color-mix(in srgb, var(--tray-text) 9%, transparent);
+    }
+
+    &[data-current="true"] {
+        background: color-mix(in srgb, var(--system-accent-color) 22%, transparent);
+    }
+}
+
+.resolution-mode-actions {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    gap: 8px;
+    margin-left: 8px;
+}
+
+.resolution-mode-favorite {
+    opacity: 0.58;
+
+    &[data-active="true"],
+    &:hover {
+        opacity: 1;
+        color: var(--system-accent-light);
+    }
+}
+
+.resolution-error,
+.resolution-mode-error {
+    color: #ff9f9f;
+}
+
+.resolution-pending-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 30px;
+    margin-top: 7px;
+    padding: 0 7px;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--system-accent-color) 24%, transparent);
+
+    .resolution-pending-text {
+        flex: 1;
+        font-weight: 600;
+    }
+
+    button {
+        min-height: 24px;
+        padding: 0 8px;
+        border-radius: 4px;
+        cursor: pointer;
+        background: color-mix(in srgb, var(--tray-text) 10%, transparent);
+
+        &:hover {
+            background: color-mix(in srgb, var(--tray-text) 17%, transparent);
+        }
     }
 }
 
@@ -607,7 +800,7 @@ body[data-is-win11="true"] {
             & > .monitor-item {
                 display: none !important;
             }
-            .name-row, .feature-row {
+            .name-row, .feature-row, .resolution-control, .resolution-linked-row {
                 display: none;
             }
             .feature-row.feature-brightness {

@@ -5,8 +5,10 @@ const path = require('path');
 
 let isDev = app.commandLine.hasSwitch("dev")
 
-let package = fs.readFileSync(isDev ? "package.json" : __dirname + '/../package.json')
-if(package) package = JSON.parse(package)
+let package = {}
+if (isDev) {
+  package = JSON.parse(fs.readFileSync("package.json"))
+}
 
 const appVersionFull = (package?.versionBuild ?? app.getVersion())
 const appVersion = appVersionFull.split('+')[0]
@@ -47,7 +49,7 @@ if(app.commandLine.hasSwitch("show-console")) {
 
 const { Readable } = require("node:stream")
 //require("os").setPriority(0, require("os").constants.priority.PRIORITY_BELOW_NORMAL)
-const { BrowserWindow, nativeTheme, systemPreferences, Menu, ipcMain, screen, globalShortcut, powerMonitor } = require('electron')
+const { BrowserWindow, nativeTheme, systemPreferences, Menu, ipcMain, screen, globalShortcut, powerMonitor, dialog } = require('electron')
 const uuid = require('crypto').randomUUID
 
 // Expose GC
@@ -65,6 +67,7 @@ const knownDDCBrightnessVCPs = monitorRules?.ddcBrightnessCodes
 
 const { fork, exec } = require('child_process');
 const { VerticalRefreshRateContext, addDisplayChangeListener } = require("win32-displayconfig");
+const w32disp = require("win32-displayconfig");
 const refreshCtx = new VerticalRefreshRateContext();
 
 const {WindowUtils, MediaStatus, PowerEvents, AppStartup} = require("tt-windows-utils")
@@ -481,6 +484,14 @@ const defaultSettings = {
   order: [],
   monitorFeatures: {},
   monitorFeaturesSettings: {},
+  resolutionControlsEnabled: true,
+  resolutionShowRefreshRate: true,
+  resolutionHideLowRefreshRates: true,
+  resolutionShowOnlyFavorites: false,
+  resolutionShowAllModes: false,
+  resolutionRevertTimeoutSeconds: 15,
+  resolutionFavorites: {},
+  resolutionPresets: [],
   hideDisplays: {},
   hdrDisplays: {},
   sdrAsMainSliderDisplays: {},
@@ -1113,6 +1124,7 @@ function applyHotkeys(monitorList = monitors) {
           }
         } catch (e) {
           // Couldn't register hotkey
+          console.log(`Couldn't register hotkey: ${hotkey.accelerator}`, e)
         }
   
       }
@@ -1156,6 +1168,21 @@ async function doHotkey(hotkey) {
         } else if (action.type === "refresh") {
           showOverlay = false
           await refreshMonitors(true, true)
+        } else if (action.type === "resolution") {
+          showOverlay = false
+          const displayKey = action.resolutionDisplayKey
+          const favoriteKey = action.resolutionFavoriteKey
+          const favorites = settings.resolutionFavorites?.[displayKey] || []
+          const favorite = favorites.find(item => {
+            const exactKey = getResolutionFavoriteKey(item)
+            const [shortKey] = `${exactKey}`.split("|")
+            return exactKey === favoriteKey || shortKey === favoriteKey
+          })
+          if (!favorite) {
+            throw new Error("Resolution favorite is not available.")
+          }
+          const mode = await findResolutionModeForFavorite(displayKey, favorite)
+          await applyResolutionModeWithRollback(displayKey, mode)
         } else if (action.type === "set" || action.type === "offset" || action.type === "cycle") {
 
           // Build list of all applicable monitors
@@ -1293,6 +1320,13 @@ async function doHotkey(hotkey) {
 
       } catch (e) {
         console.log("HOTKEY ERROR:", e)
+        if (action.type === "resolution") {
+          sendToAllWindows("resolution:error", {
+            displayKey: action.resolutionDisplayKey,
+            operation: "hotkey",
+            error: serializeResolutionError(e)
+          })
+        }
       }
     }
 
@@ -1641,6 +1675,165 @@ function sendToAllWindows(eventName, data) {
   if (introWindow) {
     introWindow.webContents.send(eventName, data)
   }
+}
+
+let pendingResolutionChange = null
+
+function getResolutionDisplayPath(displayKey) {
+  const monitor = Object.values(monitors || {}).find((display) => {
+    return display?.resolutionDisplayKey === displayKey ||
+      display?.win32DevicePath === displayKey ||
+      display?.id === displayKey ||
+      display?.key === displayKey
+  })
+  return monitor?.win32DevicePath || monitor?.resolutionDisplayKey || displayKey
+}
+
+function serializeResolutionError(error) {
+  return {
+    message: error?.message || String(error),
+    code: error?.code
+  }
+}
+
+function resolutionPendingSnapshot() {
+  if (!pendingResolutionChange) return null
+  return {
+    id: pendingResolutionChange.id,
+    displayKey: pendingResolutionChange.displayKey,
+    originalMode: pendingResolutionChange.originalMode,
+    requestedMode: pendingResolutionChange.requestedMode,
+    targetMode: pendingResolutionChange.targetMode,
+    expiresAt: pendingResolutionChange.expiresAt,
+    secondsRemaining: Math.max(0, Math.ceil((pendingResolutionChange.expiresAt - Date.now()) / 1000))
+  }
+}
+
+function broadcastResolutionPendingChange() {
+  sendToAllWindows("resolution:pending-change", resolutionPendingSnapshot())
+}
+
+function clearResolutionPendingChange() {
+  if (pendingResolutionChange?.timeout) clearTimeout(pendingResolutionChange.timeout)
+  if (pendingResolutionChange?.interval) clearInterval(pendingResolutionChange.interval)
+  pendingResolutionChange = null
+  broadcastResolutionPendingChange()
+}
+
+async function revertPendingResolutionChange(reason = "manual") {
+  if (!pendingResolutionChange) return { reverted: false }
+
+  const pending = pendingResolutionChange
+  try {
+    await w32disp.restoreDisplayConfig({
+      config: pending.originalDisplayConfig,
+      persistent: false
+    })
+    clearResolutionPendingChange()
+    refreshMonitors(true, true)
+    return { reverted: true, reason }
+  } catch (error) {
+    console.log("Resolution rollback failed", error)
+    dialog.showMessageBox({
+      type: "error",
+      title: "Resolution rollback failed",
+      message: "Twinkle Tray could not restore the previous display mode.",
+      detail: "Use Windows display settings to restore your display manually. Error: " + (error?.message || error)
+    })
+    sendToAllWindows("resolution:error", {
+      operation: "revert",
+      error: serializeResolutionError(error)
+    })
+    throw error
+  }
+}
+
+async function confirmPendingResolutionChange(id) {
+  if (!pendingResolutionChange) return { confirmed: false }
+  if (id && id !== pendingResolutionChange.id) return { confirmed: false }
+
+  const pending = pendingResolutionChange
+  const deviceNameOrPath = getResolutionDisplayPath(pending.displayKey)
+  await w32disp.setDisplayMode({
+    deviceNameOrPath,
+    mode: pending.requestedMode || pending.targetMode,
+    persistent: true
+  })
+  clearResolutionPendingChange()
+  refreshMonitors(true, true)
+  return { confirmed: true }
+}
+
+function startResolutionPendingChange(pending) {
+  if (pendingResolutionChange) {
+    clearResolutionPendingChange()
+  }
+
+  pendingResolutionChange = pending
+  pendingResolutionChange.interval = setInterval(broadcastResolutionPendingChange, 1000)
+  pendingResolutionChange.timeout = setTimeout(() => {
+    revertPendingResolutionChange("timeout").catch(() => {})
+  }, Math.max(1, settings.resolutionRevertTimeoutSeconds || 15) * 1000)
+  broadcastResolutionPendingChange()
+}
+
+async function applyResolutionModeWithRollback(displayKey, mode) {
+  if (!settings.resolutionControlsEnabled) {
+    throw new Error("Resolution controls are disabled.")
+  }
+  if (pendingResolutionChange) {
+    throw new Error("A resolution change is already waiting for confirmation.")
+  }
+  if (!displayKey || !mode) {
+    throw new Error("Resolution target is missing.")
+  }
+  const deviceNameOrPath = getResolutionDisplayPath(displayKey)
+  const originalDisplayConfig = await w32disp.displayConfigForRestoration()
+  const originalMode = await w32disp.getCurrentDisplayMode({ deviceNameOrPath })
+  let result
+  try {
+    result = await w32disp.setDisplayMode({
+      deviceNameOrPath,
+      mode,
+      persistent: false
+    })
+  } catch (error) {
+    try {
+      await w32disp.restoreDisplayConfig({
+        config: originalDisplayConfig,
+        persistent: false
+      })
+      refreshMonitors(true, true)
+    } catch (restoreError) {
+      console.log("Resolution apply failed and safety restore also failed", restoreError)
+      dialog.showMessageBox({
+        type: "error",
+        title: "Resolution restore failed",
+        message: "Twinkle Tray could not restore the previous display mode after a failed resolution change.",
+        detail: "Use Windows display settings to restore your display manually. Error: " + (restoreError?.message || restoreError)
+      })
+      sendToAllWindows("resolution:error", {
+        displayKey,
+        operation: "restore-after-apply",
+        error: serializeResolutionError(restoreError)
+      })
+    }
+    throw error
+  }
+
+  const id = uuid()
+  const timeoutSeconds = Math.max(1, settings.resolutionRevertTimeoutSeconds || 15)
+  startResolutionPendingChange({
+    id,
+    displayKey,
+    originalMode,
+    requestedMode: mode,
+    targetMode: result.afterMode,
+    originalDisplayConfig,
+    expiresAt: Date.now() + timeoutSeconds * 1000
+  })
+  refreshMonitors(true, true)
+  return { id, result }
 }
 
 ipcMain.on('send-settings', (event, data) => {
@@ -2394,6 +2587,96 @@ ipcMain.on('update-brightness', function (event, data) {
 ipcMain.on('request-monitors', function (event, arg) {
   sendToAllWindows("monitors-updated", monitors)
   //refreshMonitors(false, true)
+})
+
+ipcMain.on('resolution:list-modes', async function (event, data = {}) {
+  try {
+    if (!settings.resolutionControlsEnabled) {
+      throw new Error("Resolution controls are disabled.")
+    }
+    const deviceNameOrPath = getResolutionDisplayPath(data.displayKey || data.deviceNameOrPath)
+    const result = await w32disp.getDisplayModes({
+      deviceNameOrPath,
+      includeAllModes: !!settings.resolutionShowAllModes
+    })
+    event.reply('resolution:modes', {
+      requestId: data.requestId,
+      displayKey: data.displayKey,
+      result
+    })
+  } catch (error) {
+    event.reply('resolution:modes', {
+      requestId: data.requestId,
+      displayKey: data.displayKey,
+      error: serializeResolutionError(error)
+    })
+  }
+})
+
+ipcMain.on('resolution:apply-mode', async function (event, data = {}) {
+  try {
+    const displayKey = data.displayKey || data.deviceNameOrPath
+    const { id, result } = await applyResolutionModeWithRollback(displayKey, data.mode)
+    event.reply('resolution:apply-result', {
+      requestId: data.requestId,
+      id,
+      result
+    })
+  } catch (error) {
+    event.reply('resolution:apply-result', {
+      requestId: data.requestId,
+      error: serializeResolutionError(error)
+    })
+    sendToAllWindows("resolution:error", {
+      operation: "apply",
+      error: serializeResolutionError(error)
+    })
+  }
+})
+
+ipcMain.on('resolution:confirm-change', async function (event, data = {}) {
+  try {
+    const result = await confirmPendingResolutionChange(data.id)
+    event.reply('resolution:confirm-result', {
+      requestId: data.requestId,
+      ...result
+    })
+  } catch (error) {
+    event.reply('resolution:confirm-result', {
+      requestId: data.requestId,
+      error: serializeResolutionError(error)
+    })
+    sendToAllWindows("resolution:error", {
+      operation: "confirm",
+      error: serializeResolutionError(error)
+    })
+  }
+})
+
+ipcMain.on('resolution:revert-change', async function (event, data = {}) {
+  try {
+    if (data.id && pendingResolutionChange?.id && data.id !== pendingResolutionChange.id) {
+      event.reply('resolution:revert-result', {
+        requestId: data.requestId,
+        reverted: false
+      })
+      return
+    }
+    const result = await revertPendingResolutionChange("manual")
+    event.reply('resolution:revert-result', {
+      requestId: data.requestId,
+      ...result
+    })
+  } catch (error) {
+    event.reply('resolution:revert-result', {
+      requestId: data.requestId,
+      error: serializeResolutionError(error)
+    })
+  }
+})
+
+ipcMain.on('resolution:request-pending-change', function () {
+  broadcastResolutionPendingChange()
 })
 
 ipcMain.on('full-refresh', function (event, forceUpdate = false) {
@@ -3355,6 +3638,7 @@ function setTrayMenu() {
     getTimeAdjustmentsMenuItem(),
     getDetectIdleMenuItem(),
     getProfilesMenuItem(),
+    getResolutionTrayMenuItem(),
     getPausableSeparatorMenuItem(),
     { label: T.t("GENERIC_REFRESH_DISPLAYS"), type: 'normal', click: () => refreshMonitors(true, true) },
     { label: T.t("GENERIC_SETTINGS"), type: 'normal', click: createSettings },
@@ -3384,6 +3668,132 @@ function getDetectIdleMenuItem() {
     return { label: T.t("GENERIC_PAUSE_IDLE"), type: 'checkbox', click: (e) => tempSettings.pauseIdleDetection = e.checked }
   }
   return { label: "", visible: false }
+}
+
+function formatResolutionModeLabel(mode) {
+  if (!mode?.width || !mode?.height) return T.t("GENERIC_NOT_SUPPORTED")
+  const refreshRate = mode.refreshRate ?? mode.displayFrequency
+  const hz = refreshRate && settings.resolutionShowRefreshRate ? ` · ${Math.round(refreshRate * 100) / 100}Hz` : ""
+  return `${mode.width}x${mode.height}${hz}`
+}
+
+function resolutionModeFavoriteKey(mode) {
+  return `${mode.width}x${mode.height}@${Math.round((mode.refreshRate ?? mode.displayFrequency ?? 0) * 100) / 100}`
+}
+
+function getResolutionFavoriteKey(favorite) {
+  if (typeof favorite === "string") return favorite
+  const baseKey = favorite?.key || resolutionModeFavoriteKey(favorite)
+  return [
+    baseKey,
+    favorite?.bitsPerPel ?? "",
+    favorite?.displayFlags ?? "",
+    favorite?.fixedOutput ?? ""
+  ].join("|")
+}
+
+function modeFromResolutionFavorite(favorite) {
+  if (favorite && typeof favorite === "object") {
+    return {
+      width: favorite.width,
+      height: favorite.height,
+      refreshRate: favorite.refreshRate ?? favorite.displayFrequency,
+      displayFrequency: favorite.displayFrequency ?? favorite.refreshRate,
+      bitsPerPel: favorite.bitsPerPel,
+      displayFlags: favorite.displayFlags,
+      fixedOutput: favorite.fixedOutput
+    }
+  }
+  const favoriteKey = getResolutionFavoriteKey(favorite)
+  const [shortKey] = `${favoriteKey}`.split("|")
+  const [size, refreshRate] = shortKey.split("@")
+  const [width, height] = size.split("x").map(value => parseInt(value))
+  return {
+    width,
+    height,
+    displayFrequency: parseFloat(refreshRate)
+  }
+}
+
+function isResolutionFavoriteMode(mode, favorite) {
+  const [shortKey] = `${getResolutionFavoriteKey(favorite)}`.split("|")
+  if (resolutionModeFavoriteKey(mode) !== shortKey) return false
+  if (!favorite || typeof favorite !== "object") return true
+  return (favorite.bitsPerPel === undefined || mode.bitsPerPel === favorite.bitsPerPel) &&
+    (favorite.displayFlags === undefined || mode.displayFlags === favorite.displayFlags) &&
+    (favorite.fixedOutput === undefined || mode.fixedOutput === favorite.fixedOutput)
+}
+
+async function findResolutionModeForFavorite(displayKey, favoriteKey) {
+  const deviceNameOrPath = getResolutionDisplayPath(displayKey)
+  const result = await w32disp.getDisplayModes({
+    deviceNameOrPath,
+    includeAllModes: true
+  })
+  const mode = result.modes.find(mode => isResolutionFavoriteMode(mode, favoriteKey))
+  if (!mode) {
+    throw new Error("Resolution favorite is not available.")
+  }
+  return mode
+}
+
+function getResolutionMenuDisplayKey(monitor) {
+  return monitor?.resolutionDisplayKey || monitor?.win32DevicePath || monitor?.key
+}
+
+function getTrayMonitorName(monitor, names = {}) {
+  if (names?.[monitor.id]) {
+    return `${names[monitor.id]} (${monitor.name})`
+  }
+  return monitor.name || monitor.id || monitor.key
+}
+
+function getResolutionTrayMenuItem() {
+  if (!settings.resolutionControlsEnabled) return { label: "", visible: false }
+  const displayItems = []
+  for (const monitor of Object.values(monitors || {})) {
+    const displayKey = getResolutionMenuDisplayKey(monitor)
+    if (!displayKey || !monitor?.resolution?.width || settings.hideDisplays?.[monitor.key] === true) continue
+
+    const favorites = settings.resolutionFavorites?.[displayKey] || []
+    const submenu = []
+    if (favorites.length) {
+      for (const favorite of favorites) {
+        const mode = modeFromResolutionFavorite(favorite)
+        submenu.push({
+          label: formatResolutionModeLabel(mode),
+          type: "normal",
+          click: () => {
+            findResolutionModeForFavorite(displayKey, favorite).then(mode => {
+              return applyResolutionModeWithRollback(displayKey, mode)
+            }).catch(error => {
+              sendToAllWindows("resolution:error", {
+                displayKey,
+                operation: "tray",
+                error: serializeResolutionError(error)
+              })
+            })
+          }
+        })
+      }
+    } else {
+      submenu.push({
+        label: formatResolutionModeLabel(monitor.resolution),
+        enabled: false
+      })
+      submenu.push({
+        label: T.t("PANEL_RESOLUTION_MORE"),
+        type: "normal",
+        click: () => toggleTray(true)
+      })
+    }
+    displayItems.push({
+      label: getTrayMonitorName(monitor, settings.names || {}),
+      submenu: Menu.buildFromTemplate(submenu)
+    })
+  }
+  if (!displayItems.length) return { label: "", visible: false }
+  return { label: T.t("SETTINGS_RESOLUTION_TITLE"), submenu: Menu.buildFromTemplate(displayItems) }
 }
 
 function getProfilesMenuItem() {

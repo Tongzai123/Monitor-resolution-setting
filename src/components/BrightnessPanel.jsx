@@ -5,6 +5,194 @@ import HDRSliders from "./HDRSliders";
 import TranslateReact from "../TranslateReact"
 import getMonitorName from "../utils/BrightnessPanel/getMonitorName";
 
+function formatResolutionMode(mode, showRefreshRate = true) {
+  if (!mode?.width || !mode?.height) return ""
+  const refreshRate = mode.refreshRate ?? mode.displayFrequency
+  const hz = refreshRate ? ` · ${Math.round(refreshRate * 100) / 100}Hz` : ""
+  const rawDetails = window.settings?.resolutionShowAllModes ? [
+    mode.bitsPerPel ? `${mode.bitsPerPel}bpp` : "",
+    mode.displayFlags ? `flags ${mode.displayFlags}` : "",
+    mode.fixedOutput ? `fixed ${mode.fixedOutput}` : ""
+  ].filter(Boolean).join(" · ") : ""
+  return `${mode.width}x${mode.height}${showRefreshRate ? hz : ""}${rawDetails ? ` · ${rawDetails}` : ""}`
+}
+
+function getResolutionDisplayKey(monitor) {
+  return monitor?.resolutionDisplayKey || monitor?.win32DevicePath || monitor?.key
+}
+
+function isCommonResolutionMode(mode) {
+  const refreshRate = mode.refreshRate ?? mode.displayFrequency ?? 0
+  return mode.isCurrent || ((mode.width || 0) >= 1280 && (mode.height || 0) >= 720 && (!refreshRate || refreshRate >= 59.5))
+}
+
+function resolutionModeRenderKey(mode) {
+  return [
+    formatResolutionFavoriteKey(mode),
+    mode.bitsPerPel ?? "",
+    mode.displayFlags ?? "",
+    mode.fixedOutput ?? "",
+    mode.modeIndex ?? ""
+  ].join("|")
+}
+
+function ResolutionPendingChangeBar({ T, pendingChange, monitor, onConfirm, onRevert }) {
+  if (!pendingChange || pendingChange.displayKey !== getResolutionDisplayKey(monitor)) return null
+
+  return (
+    <div className="resolution-pending-bar">
+      <div className="resolution-pending-text">
+        {pendingChange.secondsRemaining}s
+      </div>
+      <button onClick={() => onConfirm(pendingChange.id)}>{T.t("PANEL_RESOLUTION_KEEP_CHANGES")}</button>
+      <button onClick={() => onRevert(pendingChange.id)}>{T.t("PANEL_RESOLUTION_REVERT")}</button>
+    </div>
+  )
+}
+
+function ResolutionModeList({ T, modesState, currentLabel, onSelect, onToggleFavorite }) {
+  if (!modesState?.open) return null
+
+  if (modesState.loading) {
+    return <div className="resolution-mode-list"><div className="resolution-mode-empty">{T.t("PANEL_RESOLUTION_LOADING")}</div></div>
+  }
+
+  if (modesState.error) {
+    return <div className="resolution-mode-list"><div className="resolution-mode-error">{modesState.error}</div></div>
+  }
+
+  let modes = modesState.modes || []
+  const favorites = modesState.favorites || []
+  if (window.settings?.resolutionHideLowRefreshRates) {
+    modes = modes.filter(mode => {
+      const refreshRate = mode.refreshRate ?? mode.displayFrequency
+      return mode.isCurrent || !refreshRate || refreshRate >= 59.5
+    })
+  }
+  if (window.settings?.resolutionShowOnlyFavorites) {
+    modes = modes.filter(mode => isResolutionFavoriteMode(mode, favorites) || mode.isCurrent)
+  }
+  if (!modes.length) {
+    return <div className="resolution-mode-list"><div className="resolution-mode-empty">{T.t("PANEL_RESOLUTION_NO_MODES")}</div></div>
+  }
+
+  const favoriteModes = modes.filter(mode => isResolutionFavoriteMode(mode, favorites))
+  const commonModes = modes.filter(mode => !isResolutionFavoriteMode(mode, favorites) && isCommonResolutionMode(mode))
+  const otherModes = modes.filter(mode => !isResolutionFavoriteMode(mode, favorites) && !isCommonResolutionMode(mode))
+
+  const renderGroup = (label, groupModes) => {
+    if (!groupModes.length) return null
+    return (
+      <div className="resolution-mode-group" key={label}>
+        <div className="resolution-mode-group-title">{label}</div>
+        {groupModes.map((mode) => {
+          const label = formatResolutionMode(mode, window.settings?.resolutionShowRefreshRate)
+          const favoriteKey = formatResolutionFavoriteKey(mode)
+          const isFavorite = isResolutionFavoriteMode(mode, favorites)
+          return (
+            <button
+              key={resolutionModeRenderKey(mode)}
+              className="resolution-mode-item"
+              data-current={mode.isCurrent || label === currentLabel}
+              onClick={() => onSelect(mode)}
+            >
+              <span>{label}</span>
+              <span className="resolution-mode-actions">
+                {mode.isCurrent || label === currentLabel ? <span className="resolution-mode-check">&#xE73E;</span> : null}
+                <span
+                  className="resolution-mode-favorite"
+                  data-active={isFavorite}
+                  title={T.t(isFavorite ? "PANEL_RESOLUTION_REMOVE_FAVORITE" : "PANEL_RESOLUTION_ADD_FAVORITE")}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    onToggleFavorite(mode)
+                  }}
+                >
+                  {isFavorite ? "\uE735" : "\uE734"}
+                </span>
+              </span>
+            </button>
+          )
+        })}
+      </div>
+    )
+  }
+
+  return (
+    <div className="resolution-mode-list">
+      {renderGroup(T.t("PANEL_RESOLUTION_FAVORITES"), favoriteModes)}
+      {renderGroup(T.t("PANEL_RESOLUTION_COMMON"), commonModes)}
+      {renderGroup(T.t("PANEL_RESOLUTION_ALL_MODES"), otherModes)}
+    </div>
+  )
+}
+
+function formatResolutionFavoriteKey(mode) {
+  return `${mode.width}x${mode.height}@${Math.round((mode.refreshRate ?? mode.displayFrequency ?? 0) * 100) / 100}`
+}
+
+function getResolutionFavoriteKey(favorite) {
+  if (!favorite) return ""
+  if (typeof favorite === "string") return favorite
+  if (!favorite.width || !favorite.height) return ""
+  return favorite?.key || formatResolutionFavoriteKey(favorite)
+}
+
+function isResolutionFavoriteMode(mode, favorites = []) {
+  return favorites.some(favorite => {
+    if (typeof favorite === "string") return favorite === formatResolutionFavoriteKey(mode)
+    if (getResolutionFavoriteKey(favorite) !== formatResolutionFavoriteKey(mode)) return false
+    return (favorite.bitsPerPel === undefined || mode.bitsPerPel === favorite.bitsPerPel) &&
+      (favorite.displayFlags === undefined || mode.displayFlags === favorite.displayFlags) &&
+      (favorite.fixedOutput === undefined || mode.fixedOutput === favorite.fixedOutput)
+  })
+}
+
+function createResolutionFavorite(mode) {
+  return {
+    key: formatResolutionFavoriteKey(mode),
+    width: mode.width,
+    height: mode.height,
+    refreshRate: mode.refreshRate ?? mode.displayFrequency,
+    displayFrequency: mode.displayFrequency ?? mode.refreshRate,
+    bitsPerPel: mode.bitsPerPel,
+    displayFlags: mode.displayFlags,
+    fixedOutput: mode.fixedOutput
+  }
+}
+
+function localizeResolutionError(T, error) {
+  const message = error?.message || error
+  if (message === "A resolution change is already waiting for confirmation.") {
+    return T.t("PANEL_RESOLUTION_PENDING_EXISTS")
+  }
+  return message || T.t("PANEL_RESOLUTION_ERROR")
+}
+
+function ResolutionControl({ T, monitor, modesState, pendingChange, error, onToggle, onSelect, onConfirm, onRevert, onToggleFavorite, hideLeadingIcon = false }) {
+  if (!window.settings?.resolutionControlsEnabled || !monitor?.resolution?.width || !getResolutionDisplayKey(monitor)) return null
+
+  const currentLabel = formatResolutionMode(monitor.resolution, window.settings?.resolutionShowRefreshRate)
+
+  return (
+    <div className="resolution-control">
+      <div className="resolution-segment">
+        <button className="resolution-current" onClick={() => onToggle(monitor)}>
+          {!hideLeadingIcon ? <span className="resolution-icon">&#xE7F4;</span> : null}
+          <span className="resolution-label">{currentLabel}</span>
+        </button>
+        <button className="resolution-expand" title={T.t("PANEL_RESOLUTION_EXPAND")} onClick={() => onToggle(monitor)}>
+          <span>&#xE70D;</span>
+        </button>
+      </div>
+      <ResolutionModeList T={T} modesState={modesState} currentLabel={currentLabel} onSelect={(mode) => onSelect(monitor, mode)} onToggleFavorite={(mode) => onToggleFavorite(monitor, mode)} />
+      {error ? <div className="resolution-error">{error}</div> : null}
+      <ResolutionPendingChangeBar T={T} pendingChange={pendingChange} monitor={monitor} onConfirm={onConfirm} onRevert={onRevert} />
+    </div>
+  )
+}
+
 const BrightnessPanel = memo(function BrightnessPanel() {
 
   const [state, setState] = useState({
@@ -14,7 +202,10 @@ const BrightnessPanel = memo(function BrightnessPanel() {
     update: false,
     sleeping: false,
     updateProgress: 0,
-    isRefreshing: window.isRefreshing
+    isRefreshing: window.isRefreshing,
+    resolutionModes: {},
+    resolutionPendingChange: window.pendingResolutionChange,
+    resolutionErrors: {}
   })
   const [doBackgroundEvent, setDoBackgroundEvent] = useState(false)
   const [levelsChanged, setLevelsChanged] = useState(false)
@@ -118,7 +309,14 @@ const BrightnessPanel = memo(function BrightnessPanel() {
       remaps,
       names,
       updateInterval,
-      sleepAction
+      sleepAction,
+      resolutionModes: Object.fromEntries(Object.entries(prev.resolutionModes || {}).map(([displayKey, modeState]) => [
+        displayKey,
+        {
+          ...modeState,
+          favorites: settings.resolutionFavorites?.[displayKey] || []
+        }
+      ]))
     }))
     resetBrightnessInterval()
     updateMinMax()
@@ -133,6 +331,171 @@ const BrightnessPanel = memo(function BrightnessPanel() {
   const recievedSleep = (e) => {
     setState(prev => ({ ...prev, sleeping: e.detail }))
   }
+
+  const handleResolutionPendingChange = (e) => {
+    setState(prev => ({ ...prev, resolutionPendingChange: e.detail }))
+  }
+
+  const handleResolutionError = (e) => {
+    const displayKey = e.detail?.displayKey || e.detail?.operation || "global"
+    setState(prev => ({
+      ...prev,
+      resolutionErrors: {
+        ...prev.resolutionErrors,
+        [displayKey]: localizeResolutionError(T, e.detail?.error || e.detail)
+      }
+    }))
+  }
+
+  const getResolutionKey = getResolutionDisplayKey
+
+  const updateResolutionModesState = (displayKey, patch) => {
+    setState(prev => ({
+      ...prev,
+      resolutionModes: {
+        ...prev.resolutionModes,
+        [displayKey]: {
+          ...(prev.resolutionModes?.[displayKey] || {}),
+          ...patch
+        }
+      }
+    }))
+  }
+
+  const clearResolutionError = (displayKey) => {
+    setState(prev => {
+      const resolutionErrors = { ...(prev.resolutionErrors || {}) }
+      delete resolutionErrors[displayKey]
+      delete resolutionErrors.global
+      return { ...prev, resolutionErrors }
+    })
+  }
+
+  const toggleResolutionModes = async (monitor) => {
+    const displayKey = getResolutionKey(monitor)
+    if (!displayKey) return
+
+    const current = state.resolutionModes?.[displayKey]
+    if (current?.open) {
+      updateResolutionModesState(displayKey, { open: false })
+      return
+    }
+
+    clearResolutionError(displayKey)
+    updateResolutionModesState(displayKey, { open: true, loading: true, error: false })
+    try {
+      const result = await window.resolution.listModes(displayKey)
+      updateResolutionModesState(displayKey, {
+        open: true,
+        loading: false,
+        modes: result?.modes || [],
+        favorites: window.settings?.resolutionFavorites?.[displayKey] || [],
+        error: false
+      })
+    } catch (error) {
+      updateResolutionModesState(displayKey, {
+        open: true,
+        loading: false,
+        error: error?.message || T.t("PANEL_RESOLUTION_LOAD_FAILED")
+      })
+    }
+  }
+
+  const selectResolutionMode = async (monitor, mode) => {
+    const displayKey = getResolutionKey(monitor)
+    if (!displayKey) return
+    clearResolutionError(displayKey)
+    updateResolutionModesState(displayKey, { applying: true })
+    try {
+      await window.resolution.applyMode(displayKey, mode)
+      updateResolutionModesState(displayKey, { open: false, applying: false })
+    } catch (error) {
+      updateResolutionModesState(displayKey, { applying: false })
+      setState(prev => ({
+        ...prev,
+        resolutionErrors: {
+          ...prev.resolutionErrors,
+          [displayKey]: localizeResolutionError(T, error)
+        }
+      }))
+    }
+  }
+
+  const toggleResolutionFavorite = (monitor, mode) => {
+    const displayKey = getResolutionKey(monitor)
+    if (!displayKey) return
+    const resolutionFavorites = { ...(window.settings?.resolutionFavorites || {}) }
+    const favorites = resolutionFavorites[displayKey] || []
+    const existingIndex = favorites.findIndex(favorite => isResolutionFavoriteMode(mode, [favorite]))
+    if (existingIndex >= 0) {
+      resolutionFavorites[displayKey] = favorites.filter((_, index) => index !== existingIndex)
+    } else {
+      resolutionFavorites[displayKey] = [...favorites, createResolutionFavorite(mode)]
+    }
+    window.settings.resolutionFavorites = resolutionFavorites
+    updateResolutionModesState(displayKey, { favorites: resolutionFavorites[displayKey] })
+    window.sendSettings({ resolutionFavorites })
+  }
+
+  const confirmResolutionChange = async (id) => {
+    try {
+      await window.resolution.confirmChange(id)
+    } catch (error) {
+      setState(prev => ({
+        ...prev,
+        resolutionErrors: {
+          ...prev.resolutionErrors,
+          global: localizeResolutionError(T, error)
+        }
+      }))
+    }
+  }
+
+  const revertResolutionChange = async (id) => {
+    try {
+      await window.resolution.revertChange(id)
+    } catch (error) {
+      setState(prev => ({
+        ...prev,
+        resolutionErrors: {
+          ...prev.resolutionErrors,
+          global: error?.message || T.t("PANEL_RESOLUTION_REVERT_FAILED")
+        }
+      }))
+    }
+  }
+
+  const renderResolutionControl = (monitor, options = {}) => (
+    <ResolutionControl
+      T={T}
+      monitor={monitor}
+      modesState={state.resolutionModes?.[getResolutionKey(monitor)]}
+      pendingChange={state.resolutionPendingChange}
+      error={state.resolutionErrors?.[getResolutionKey(monitor)] || state.resolutionErrors?.global}
+      onToggle={toggleResolutionModes}
+      onSelect={selectResolutionMode}
+      onConfirm={confirmResolutionChange}
+      onRevert={revertResolutionChange}
+      onToggleFavorite={toggleResolutionFavorite}
+      hideLeadingIcon={options.hideLeadingIcon}
+    />
+  )
+
+  const getSortedMonitors = () => Object.values(state.monitors || {}).slice(0).sort((a, b) => {
+    const aSort = (a.order === undefined ? 999 : a.order * 1)
+    const bSort = (b.order === undefined ? 999 : b.order * 1)
+    return aSort - bSort
+  })
+
+  const renderLinkedResolutionControls = () => getSortedMonitors().map((monitor) => {
+    if ((monitor.type == "none" && monitor.hdr !== "active") || window.settings?.hideDisplays?.[monitor.key] === true || !getResolutionDisplayKey(monitor)) return null
+    return (
+      <div className="resolution-linked-row" key={`resolution-${monitor.key}`}>
+        <div className="resolution-linked-name">{getMonitorName(monitor, state.names)}</div>
+        {renderResolutionControl(monitor)}
+      </div>
+    )
+  })
 
 
 
@@ -177,6 +540,8 @@ const BrightnessPanel = memo(function BrightnessPanel() {
     window.addEventListener("updateUpdated", (e) => recievedUpdate(e))
     window.addEventListener("sleepUpdated", (e) => recievedSleep(e))
     window.addEventListener("isRefreshing", (e) => handleIsRefreshingUpdate(e))
+    window.addEventListener("resolutionPendingChange", handleResolutionPendingChange)
+    window.addEventListener("resolutionError", handleResolutionError)
 
     if (window.isAppX === false) {
       window.addEventListener("updateProgress", (e) => handleUpdateProgress(e))
@@ -185,6 +550,7 @@ const BrightnessPanel = memo(function BrightnessPanel() {
     // Update brightness every interval, if changed
     window.requestSettings()
     window.requestMonitors()
+    window.resolution?.requestPendingChange?.()
     window.ipc.send('request-localization')
     window.reactReady = true
 
@@ -195,6 +561,8 @@ const BrightnessPanel = memo(function BrightnessPanel() {
       window.removeEventListener("updateUpdated")
       window.removeEventListener("sleepUpdated")
       window.removeEventListener("isRefreshing")
+      window.removeEventListener("resolutionPendingChange", handleResolutionPendingChange)
+      window.removeEventListener("resolutionError", handleResolutionError)
       window.removeEventListener("updateProgress")
     }
   }, [])
@@ -226,17 +594,16 @@ const BrightnessPanel = memo(function BrightnessPanel() {
         if (lastValidMonitor) {
           const monitor = lastValidMonitor
           return (
-            <Slider name={T.t("GENERIC_ALL_DISPLAYS")} id={monitor.id} level={monitor.brightness} min={0} max={100} num={monitor.num} monitortype={monitor.type} hwid={monitor.key} key={monitor.key} onChange={handleChange} scrollAmount={window.settings?.scrollFlyoutAmount} />
+            <>
+              <Slider name={T.t("GENERIC_ALL_DISPLAYS")} id={monitor.id} level={monitor.brightness} min={0} max={100} num={monitor.num} monitortype={monitor.type} hwid={monitor.key} key={monitor.key} onChange={handleChange} scrollAmount={window.settings?.scrollFlyoutAmount} />
+              {renderLinkedResolutionControls()}
+            </>
           )
         }
         return (<div className="no-displays-message">{T.t("GENERIC_NO_COMPATIBLE_DISPLAYS")}</div>)
       } else {
         // Show all valid monitors individually
-        const sorted = Object.values(state.monitors).slice(0).sort((a, b) => {
-          const aSort = (a.order === undefined ? 999 : a.order * 1)
-          const bSort = (b.order === undefined ? 999 : b.order * 1)
-          return aSort - bSort
-        })
+        const sorted = getSortedMonitors()
         let useFeatures = false
         // Check if we should use the extended DDC/CI layout or simple layout
         for (const { hwid } of sorted) {
@@ -290,7 +657,7 @@ const BrightnessPanel = memo(function BrightnessPanel() {
               }
               const powerOff = () => {
                 window.ipc.send("sleep-display", monitor.hwid.join("#"))
-                monitor.features["0xD6"][0] = (monitor.features["0xD6"][0] >= 4 ? 1 : settings.ddcPowerOffValue)
+                monitor.features["0xD6"][0] = (monitor.features["0xD6"][0] >= 4 ? 1 : window.settings?.ddcPowerOffValue)
               }
               const showPowerButton = () => {
                 const customFeatureEnabled = window.settings?.monitorFeaturesSettings?.[monitor?.hwid[1]]?.["0xD6"]
@@ -314,6 +681,7 @@ const BrightnessPanel = memo(function BrightnessPanel() {
                           { showPowerButton() }
                         </div>
                       </div>
+                      {renderResolutionControl(monitor)}
                       <HDRSliders monitor={monitor} scrollAmount={window.settings?.scrollFlyoutAmount} />
                     </div>
                   )
@@ -321,6 +689,7 @@ const BrightnessPanel = memo(function BrightnessPanel() {
                 return (
                   <div className="monitor-sliders" key={monitor.key}>
                     <Slider name={getMonitorName(monitor, state.names)} id={monitor.id} level={monitor.brightness} min={0} max={100} num={monitor.num} monitortype={monitor.type} hwid={monitor.key} key={monitor.key} onChange={handleChange} afterName={showPowerButton()} scrollAmount={window.settings?.scrollFlyoutAmount} />
+                    {renderResolutionControl(monitor)}
                   </div>
                 )
               } else {
@@ -340,6 +709,10 @@ const BrightnessPanel = memo(function BrightnessPanel() {
                         <Slider id={monitor.id} level={monitor.brightness} min={0} max={100} num={monitor.num} monitortype={monitor.type} hwid={monitor.key} key={monitor.key} onChange={handleChange} scrollAmount={window.settings?.scrollFlyoutAmount} />
                       </div>
                     )}
+                    <div className="feature-row resolution-feature-row">
+                      <div className="feature-icon"><span className="icon vfix">&#xE7F4;</span></div>
+                      {renderResolutionControl(monitor, { hideLeadingIcon: true })}
+                    </div>
                     <DDCCISliders monitor={monitor} monitorFeatures={monitorFeatures} scrollAmount={window.settings?.scrollFlyoutAmount} />
                     {showHDRSliders ? <HDRSliders monitor={monitor} scrollAmount={window.settings?.scrollFlyoutAmount} /> : null}
                   </div>
