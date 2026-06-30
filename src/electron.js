@@ -18,6 +18,7 @@ const appBuildShort = (appBuild && appBuild.length > 7 ? appBuild.slice(0, 7) : 
 
 const isAppX = (app.name == "twinkle-tray-appx" ? true : false)
 const isPortable = (app.name == "twinkle-tray-portable" ? true : false)
+const updatesDisabled = true
 
 const Utils = require("./Utils")
 
@@ -496,9 +497,9 @@ const defaultSettings = {
   hdrDisplays: {},
   sdrAsMainSliderDisplays: {},
   sdrAsMainSlider: false,
-  checkForUpdates: !isDev,
+  checkForUpdates: false,
   dismissedUpdate: '',
-  language: "system",
+  language: "zh_Hans",
   names: {},
   analytics: !isDev,
   scrollShortcut: true,
@@ -586,6 +587,7 @@ function readSettings(doProcessSettings = true) {
   // Overrides
   settings.isDev = isDev
   settings.killWhenIdle = false
+  if (updatesDisabled) settings.checkForUpdates = false
 
   if(!isDev && settings.showConsole && !app.commandLine.hasSwitch("console")) {
     reopenAppWithConsole()
@@ -893,7 +895,11 @@ function processSettings(newSettings = {}, sendUpdate = true) {
       }
     }
 
-    if (newSettings.checkForUpdates !== undefined) {
+    if (updatesDisabled && (newSettings.checkForUpdates !== undefined || newSettings.branch !== undefined)) {
+      settings.checkForUpdates = false
+      latestVersion = false
+      sendToAllWindows('latest-version', latestVersion);
+    } else if (newSettings.checkForUpdates !== undefined) {
       if (newSettings.checkForUpdates === false) {
         latestVersion = false
         sendToAllWindows('latest-version', latestVersion);
@@ -915,7 +921,7 @@ function processSettings(newSettings = {}, sendUpdate = true) {
       }
     }
 
-    if (newSettings.branch) {
+    if (!updatesDisabled && newSettings.branch) {
       lastCheck = false
       settings.dismissedUpdate = false
       checkForUpdates()
@@ -2714,6 +2720,7 @@ ipcMain.on('open-url', (event, url) => {
 })
 
 ipcMain.on('get-update', (event, version) => {
+  if (updatesDisabled) return false
   latestVersion.error = false
   getLatestUpdate(version)
 })
@@ -2841,7 +2848,8 @@ function createPanel(toggleOnLoad = false, isRefreshing = false, showOnLoad = tr
         appVersion: appVersion,
         appVersionTag: appVersionTag,
         appBuild: appBuildShort,
-        isRefreshing: isRefreshing
+        isRefreshing: isRefreshing,
+        updatesDisabled
       })).toString('base64')],
       allowRunningInsecureContent: true,
       webSecurity: false
@@ -3884,7 +3892,7 @@ const toggleTray = async (doRefresh = true, isOverlay = false) => {
 
     // Send accent
     sendToAllWindows('update-colors', getAccentColors())
-    if (latestVersion) sendToAllWindows('latest-version', latestVersion);
+    if (!updatesDisabled && latestVersion) sendToAllWindows('latest-version', latestVersion);
   }
 
   if (mainWindow) {
@@ -4032,6 +4040,7 @@ function createSettings() {
         appVersion: appVersion,
         appVersionTag: appVersionTag,
         appBuild: appBuildShort,
+        updatesDisabled,
         settings,
         lastTheme,
         settingsPath
@@ -4116,6 +4125,7 @@ ipcMain.on("windowClose", e => {
 let latestVersion = false
 let lastCheck = false
 checkForUpdates = async (force = false) => {
+  if (updatesDisabled) return false
   if (!force) {
     if (!settings.checkForUpdates) return false;
     if (lastCheck && lastCheck == new Date().getDate()) return false;
@@ -4167,6 +4177,7 @@ checkForUpdates = async (force = false) => {
 
 
 getLatestUpdate = async (version) => {
+  if (updatesDisabled) return false
   try {
     console.log("Downloading update from: " + version.downloadURL)
     const fs = require('fs');
@@ -4230,6 +4241,7 @@ getLatestUpdate = async (version) => {
 }
 
 function runUpdate(expectedSize = false) {
+  if (updatesDisabled) return false
   try {
 
     if (!fs.existsSync(updatePath)) {
@@ -4284,18 +4296,25 @@ function runUpdate(expectedSize = false) {
 }
 
 ipcMain.on('check-for-updates', () => {
+  if (updatesDisabled) {
+    latestVersion = false
+    sendToAllWindows('latest-version', latestVersion)
+    return false
+  }
   latestVersion.error = false
   sendToAllWindows('latest-version', latestVersion)
   checkForUpdates(true)
 })
 
 ipcMain.on('ignore-update', (event, dismissedUpdate) => {
+  if (updatesDisabled) return false
   writeSettings({ dismissedUpdate })
   latestVersion.show = false
   sendToAllWindows('latest-version', latestVersion)
 })
 
 ipcMain.on('clear-update', (event, dismissedUpdate) => {
+  if (updatesDisabled) return false
   latestVersion.show = false
   sendToAllWindows('latest-version', latestVersion)
 })
@@ -4846,7 +4865,7 @@ function handleBackgroundUpdate(force = false) {
     console.error(e)
   }
 
-  if (!force) checkForUpdates(); // Ignore when forced update, since it should just be about fixing brightness.
+  if (!force && !updatesDisabled) checkForUpdates(); // Ignore when forced update, since it should just be about fixing brightness.
 
   // GC
   setTimeout(() => {

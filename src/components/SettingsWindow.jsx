@@ -109,6 +109,7 @@ const defaultAction = {
 }
 
 let T = new TranslateReact({}, {})
+const updatesDisabled = window.updatesDisabled === true
 
 export default class SettingsWindow extends PureComponent {
 
@@ -175,7 +176,7 @@ export default class SettingsWindow extends PureComponent {
         window.addEventListener("localizationUpdated", (e) => { this.setState({ languages: e.detail.languages });  T.setLocalizationData(e.detail.desired, e.detail.default)}); 
         window.addEventListener("windowHistory", e => this.setState({ windowHistory: e.detail }))
 
-        if (window.isAppX === false) {
+        if (window.isAppX === false && !updatesDisabled) {
             window.addEventListener("updateUpdated", (e) => {
                 const version = e.detail
                 this.setState({
@@ -366,7 +367,8 @@ export default class SettingsWindow extends PureComponent {
             {
                 id: "updates",
                 label: T.t("SETTINGS_SIDEBAR_UPDATES"),
-                icon: "&#xE895;"
+                icon: "&#xE895;",
+                hidden: updatesDisabled
             },
             {
                 id: "debug",
@@ -375,7 +377,7 @@ export default class SettingsWindow extends PureComponent {
                 type: "debug"
             }
         ]
-        return items.map((item, index) => {
+        return items.filter(item => !item.hidden).map((item, index) => {
             return (<div key={item.id} className="item" data-active={this.isSection(item.id)} data-type={item.type || "none"} onClick={() => { this.setState({ activePage: item.id }); window.currentSettingsPage = item.id; this.scrollToTop(); window.reloadReactMonitors(); window.requestMonitors(); }}>
                 <div className="icon" dangerouslySetInnerHTML={{ __html: (item.icon || "&#xE770;") }}></div><div className="label">{item.label || `Item ${index}`}</div>
             </div>)
@@ -1510,22 +1512,24 @@ export default class SettingsWindow extends PureComponent {
 
 
 
-                            <SettingsPage current={this.state.activePage} id="updates">
-                                <div className="pageSection">
-                                    <div className="sectionTitle">{T.t("SETTINGS_UPDATES_TITLE")}</div>
-                                    <p>{T.h("SETTINGS_UPDATES_VERSION", '<b>' + (window.version ? `${window.version}${window.versionTag && window.versionBuild ? ` (${window.versionBuild})` : ""}` : "not available") + '</b>')}</p>
-                                    {this.getUpdate()}
-                                </div>
-                                <div className="pageSection" style={{ display: (window.isAppX ? "none" : (this.isSection("updates") ? "block" : "none")) }}>
-                                    <SettingsOption title={T.t("SETTINGS_UPDATES_AUTOMATIC_TITLE")} description={T.t("SETTINGS_UPDATES_AUTOMATIC_DESC")} input={this.renderToggle("checkForUpdates")} />
-                                    <SettingsOption title={T.t("SETTINGS_UPDATES_CHANNEL")} input={
-                                        <select value={this.state.rawSettings.branch} onChange={(e) => { window.sendSettings({ branch: e.target.value }) }}>
-                                            <option value="master">{T.t("SETTINGS_UPDATES_BRANCH_STABLE")}</option>
-                                            <option value="beta">{T.t("SETTINGS_UPDATES_BRANCH_BETA")}</option>
-                                        </select>
-                                    } />
-                                </div>
-                            </SettingsPage>
+                            {!updatesDisabled && (
+                                <SettingsPage current={this.state.activePage} id="updates">
+                                    <div className="pageSection">
+                                        <div className="sectionTitle">{T.t("SETTINGS_UPDATES_TITLE")}</div>
+                                        <p>{T.h("SETTINGS_UPDATES_VERSION", '<b>' + (window.version ? `${window.version}${window.versionTag && window.versionBuild ? ` (${window.versionBuild})` : ""}` : "not available") + '</b>')}</p>
+                                        {this.getUpdate()}
+                                    </div>
+                                    <div className="pageSection" style={{ display: (window.isAppX ? "none" : (this.isSection("updates") ? "block" : "none")) }}>
+                                        <SettingsOption title={T.t("SETTINGS_UPDATES_AUTOMATIC_TITLE")} description={T.t("SETTINGS_UPDATES_AUTOMATIC_DESC")} input={this.renderToggle("checkForUpdates")} />
+                                        <SettingsOption title={T.t("SETTINGS_UPDATES_CHANNEL")} input={
+                                            <select value={this.state.rawSettings.branch} onChange={(e) => { window.sendSettings({ branch: e.target.value }) }}>
+                                                <option value="master">{T.t("SETTINGS_UPDATES_BRANCH_STABLE")}</option>
+                                                <option value="beta">{T.t("SETTINGS_UPDATES_BRANCH_BETA")}</option>
+                                            </select>
+                                        } />
+                                    </div>
+                                </SettingsPage>
+                            )}
 
                             <SettingsPage current={this.state.activePage} id="debug">
     

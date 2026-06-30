@@ -5,6 +5,8 @@ import HDRSliders from "./HDRSliders";
 import TranslateReact from "../TranslateReact"
 import getMonitorName from "../utils/BrightnessPanel/getMonitorName";
 
+const updatesDisabled = window.updatesDisabled === true
+
 function formatResolutionMode(mode, showRefreshRate = true) {
   if (!mode?.width || !mode?.height) return ""
   const refreshRate = mode.refreshRate ?? mode.displayFrequency
@@ -537,13 +539,13 @@ const BrightnessPanel = memo(function BrightnessPanel() {
     window.addEventListener("monitorsUpdated", (e) => recievedMonitors(e))
     window.addEventListener("settingsUpdated", (e) => recievedSettings(e))
     window.addEventListener("localizationUpdated", (e) => T.setLocalizationData(e.detail.desired, e.detail.default))
-    window.addEventListener("updateUpdated", (e) => recievedUpdate(e))
     window.addEventListener("sleepUpdated", (e) => recievedSleep(e))
     window.addEventListener("isRefreshing", (e) => handleIsRefreshingUpdate(e))
     window.addEventListener("resolutionPendingChange", handleResolutionPendingChange)
     window.addEventListener("resolutionError", handleResolutionError)
 
-    if (window.isAppX === false) {
+    if (window.isAppX === false && !updatesDisabled) {
+      window.addEventListener("updateUpdated", (e) => recievedUpdate(e))
       window.addEventListener("updateProgress", (e) => handleUpdateProgress(e))
     }
 
@@ -558,11 +560,11 @@ const BrightnessPanel = memo(function BrightnessPanel() {
       window.removeEventListener("monitorsUpdated")
       window.removeEventListener("settingsUpdated")
       window.removeEventListener("localizationUpdated")
-      window.removeEventListener("updateUpdated")
       window.removeEventListener("sleepUpdated")
       window.removeEventListener("isRefreshing")
       window.removeEventListener("resolutionPendingChange", handleResolutionPendingChange)
       window.removeEventListener("resolutionError", handleResolutionError)
+      window.removeEventListener("updateUpdated")
       window.removeEventListener("updateProgress")
     }
   }, [])
@@ -754,7 +756,7 @@ const BrightnessPanel = memo(function BrightnessPanel() {
       </div>
       {state.sleeping ? (<div></div>) : getMonitors()}
       {
-        (state.update && state.update.show)
+        !updatesDisabled && (state.update && state.update.show)
           ?
           <div className="updateBar">
             <div className="left">
@@ -771,7 +773,7 @@ const BrightnessPanel = memo(function BrightnessPanel() {
             </div>
           </div>
           :
-          (state.update && state.update.downloading)
+          !updatesDisabled && (state.update && state.update.downloading)
           &&
           <div className="updateBar">
             <div className="left progress">

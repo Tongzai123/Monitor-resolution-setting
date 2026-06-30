@@ -509,4 +509,5 @@ window.theme = "dark"
 window.settings = {}
 window.jsVars = getArgumentVars()
 window.isRefreshing = getArgumentVars().isRefreshing
+window.updatesDisabled = getArgumentVars().updatesDisabled
 window.isAppX = (getArgumentVars().appName == "twinkle-tray-appx" ? true : false)
