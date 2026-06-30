@@ -38,3 +38,36 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 2: 关闭更新并默认简体中文
+
+**Date**: 2026-06-30
+**Task**: 关闭更新并默认简体中文
+**Branch**: `main`
+
+### Summary
+
+关闭 Twinkle Tray 上游更新链路和更新 UI，将新安装默认语言改为 zh_Hans，并完成前端与 Electron 安装包构建验证。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cfadc37` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
