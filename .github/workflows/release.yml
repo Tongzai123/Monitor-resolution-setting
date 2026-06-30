@@ -1,0 +1,75 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: windows-2025
+
+    steps:
+      - name: Read repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Read release tag
+        id: release_info
+        shell: pwsh
+        run: |
+          $tag = "${env:GITHUB_REF_NAME}"
+          $version = $tag -replace '^v', ''
+          $safeVersion = $version -replace '[^0-9A-Za-z._-]', '-'
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "safe_version=$safeVersion" >> $env:GITHUB_OUTPUT
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build renderer assets
+        run: npm run parcel-build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build x64 installer
+        run: npm exec electron-builder -- --x64 --win nsis --config.extraMetadata.versionBuild="${{ steps.release_info.outputs.version }}+${{ github.sha }}" --config.win.artifactName="Twinkle.Tray.Resolution.Enhanced.v${{ steps.release_info.outputs.safe_version }}.exe" --publish="never"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build x64 portable package
+        run: npm exec electron-builder -- --x64 --win zip --config.extraMetadata.name=twinkle-tray-resolution-portable --config.extraMetadata.versionBuild="${{ steps.release_info.outputs.version }}+${{ github.sha }}" --config.win.artifactName="Twinkle.Tray.Resolution.Enhanced.v${{ steps.release_info.outputs.safe_version }}-portable.zip" --config.win.compression=normal --publish="never"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        run: |
+          $assets = @(
+            Get-ChildItem -LiteralPath dist -File |
+              Where-Object { $_.Name -like "*.exe" -or $_.Name -like "*-portable.zip" } |
+              ForEach-Object { $_.FullName }
+          )
+
+          if ($assets.Count -eq 0) {
+            throw "No release assets found in dist."
+          }
+
+          gh release create "${{ steps.release_info.outputs.tag }}" `
+            --title "Twinkle Tray 分辨率增强版 ${{ steps.release_info.outputs.version }}" `
+            --notes "本版本由 GitHub Actions 根据标签 ${{ steps.release_info.outputs.tag }} 自动构建。" `
+            $assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
