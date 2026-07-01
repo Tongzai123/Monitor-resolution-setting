@@ -10,6 +10,7 @@
 - 用户隐藏刷新率后选择某个分辨率时，应用该分辨率下可用的最高刷新率，避免误切到低刷新率。
 - 单显示器场景下，右键托盘菜单的“分辨率”直接展开收藏分辨率，减少一级无意义的显示器名称菜单。
 - 已收藏分辨率被视为用户确认过的安全模式，从收藏入口切换时不再弹出确认/回滚条。
+- 便携版产生的数据保存在便携版目录内，用户拷贝或删除整个便携版文件夹即可迁移或清理数据。
 
 ## 已确认事实
 
@@ -22,6 +23,7 @@
 - `src/electron.js:2622` 的 `resolution:apply-mode` IPC 当前总是调用 `applyResolutionModeWithRollback`。
 - `src/electron.js:1179` 起的快捷键收藏切换和 `src/electron.js:3775` 起的托盘右键收藏切换当前也调用 `applyResolutionModeWithRollback`，因此会触发确认/回滚。
 - `src/electron.js:3760` 起的 `getResolutionTrayMenuItem()` 当前总是先按显示器构建一级子菜单；即使只有一个可显示显示器，也会展示显示器名称。
+- `src/electron.js:25` 原先只把项目设置路径指向 `resources/config`，没有重定向 Electron 的 `userData`，便携版仍可能在系统用户目录生成运行时数据。
 - 历史任务 `.trellis/tasks/archive/2026-06/06-29-resolution-integration-check/verification.md` 记录：默认不显示全部模式时，底层模式列表已按“分辨率+刷新率”整理；本任务要处理的是隐藏刷新率后的“显示维度去重”和“目标模式选择”。
 
 ## 需求
@@ -66,6 +68,15 @@
 - 托盘面板中点击已收藏模式时，也按同一规则直接持久应用目标模式，不进入 `pendingResolutionChange`。
 - 托盘面板普通模式列表中的非收藏项继续使用现有确认/回滚流程。
 
+### R6 便携版数据留在便携版目录内
+
+便携版运行时，项目配置文件和 Electron 自身 `userData` 都必须指向可执行文件同级的 `config` 目录。
+
+- 便携版数据目录为 `<便携版目录>/config`，而不是 `resources/config` 或系统用户目录。
+- `settings.json`、`known-displays.json`、`debug.log`、`update.exe`、`mica.jpg` 等项目数据继续保存在同一个目录。
+- Electron 自动生成的运行时数据也应进入同一个 `config` 目录。
+- 安装版和开发模式继续使用原有数据目录策略，不受便携版逻辑影响。
+
 ## 非目标
 
 - 不改变底层 Win32 模式枚举和应用能力。
@@ -85,5 +96,6 @@
 - [ ] 从快捷键切换收藏分辨率时，不出现确认/回滚条，并持久应用目标模式。
 - [ ] 从托盘面板点击已收藏分辨率时，不出现确认/回滚条，并持久应用目标模式。
 - [ ] 托盘面板普通非收藏模式切换仍出现确认/回滚条，面板关闭后自动回滚能力不被破坏。
+- [ ] 便携版运行后，`settings.json` 和 Electron `userData` 运行时数据都生成在便携版可执行文件同级的 `config` 目录。
 - [ ] 收藏不可用、目标模式应用失败、已有 pending 变更等错误路径仍能通过现有错误通知或面板错误提示反馈。
 - [ ] `npm run parcel-build` 通过；至少对 `src/electron.js`、`src/components/BrightnessPanel.jsx` 做语法/转译检查。

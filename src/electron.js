@@ -8,6 +8,12 @@ let isDev = app.commandLine.hasSwitch("dev")
 let package = {}
 if (isDev) {
   package = JSON.parse(fs.readFileSync("package.json"))
+} else {
+  try {
+    package = JSON.parse(fs.readFileSync(path.join(app.getAppPath(), "package.json")))
+  } catch (e) {
+    package = {}
+  }
 }
 
 const appVersionFull = (package?.versionBuild ?? app.getVersion())
@@ -16,15 +22,22 @@ const appVersionTag = appVersion?.split('-')[1]
 const appBuild = (isDev ? "dev" : appVersionFull.split('+')[1])
 const appBuildShort = (appBuild && appBuild.length > 7 ? appBuild.slice(0, 7) : appBuild)
 
-const isAppX = (app.name == "twinkle-tray-appx" ? true : false)
-const isPortable = (app.name == "twinkle-tray-portable" ? true : false)
+const appPackageName = package?.name || app.name
+const isAppX = appPackageName === "twinkle-tray-appx" || app.name === "twinkle-tray-appx"
+const isPortable = appPackageName === "twinkle-tray-portable" || app.name === "twinkle-tray-portable"
 const updatesDisabled = true
 
 const Utils = require("./Utils")
 
-const configFilesDir = (isPortable ? path.join(__dirname, "../../config/") : app.getPath("userData"))
-const settingsPath = path.join(configFilesDir, `\\settings${(isDev ? "-dev" : "")}.json`)
-const knownDisplaysPath = path.join(configFilesDir, `\\known-displays${(isDev ? "-dev" : "")}.json`)
+const portableConfigDir = path.join(path.dirname(app.getPath("exe")), "config")
+if (isPortable) {
+  fs.mkdirSync(portableConfigDir, { recursive: true })
+  app.setPath("userData", portableConfigDir)
+}
+
+const configFilesDir = app.getPath("userData")
+const settingsPath = path.join(configFilesDir, `settings${(isDev ? "-dev" : "")}.json`)
+const knownDisplaysPath = path.join(configFilesDir, `known-displays${(isDev ? "-dev" : "")}.json`)
 
 // Handle multiple instances before continuing
 const singleInstanceLock = app.requestSingleInstanceLock(process.argv)
@@ -95,8 +108,8 @@ const SunCalc = require('suncalc')
 app.allowRendererProcessReuse = true
 
 // Logging
-const logPath = path.join(configFilesDir, `\\debug${(isDev ? "-dev" : "")}.log`)
-const updatePath = path.join(configFilesDir, `\\update.exe`)
+const logPath = path.join(configFilesDir, `debug${(isDev ? "-dev" : "")}.log`)
+const updatePath = path.join(configFilesDir, `update.exe`)
 
 // Remove old log
 if (fs.existsSync(logPath)) {
@@ -5134,7 +5147,7 @@ let currentScreenSize = { width: 1280, height: 720, scale: 1 }
 let micaBusy = false
 let lastMicaTime = Date.now()
 const homeDir = require("os").homedir()
-const micaWallpaperPath = path.join(configFilesDir, `\\mica${(isDev ? "-dev" : "")}.jpg`)
+const micaWallpaperPath = path.join(configFilesDir, `mica${(isDev ? "-dev" : "")}.jpg`)
 const windowWallpaperPath = path.join(homeDir, "AppData", "Roaming", "Microsoft", "Windows", "Themes", "TranscodedWallpaper");
 
 function checkMicaWallpaper() {

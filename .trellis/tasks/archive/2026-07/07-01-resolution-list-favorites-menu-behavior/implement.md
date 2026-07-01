@@ -38,6 +38,7 @@
    - 使用项目现有 Babel/构建链验证 `BrightnessPanel.jsx`。
    - `npm run parcel-build`
    - 如涉及运行体验，启动 `npm run dev` 做手工验证。
+   - 构建便携版后检查运行时数据目录是否为 exe 同级 `config`。
 
 ## 重点检查点
 
@@ -47,6 +48,7 @@
 - 收藏入口无回滚不会影响普通非收藏切换的 pending/回滚流程。
 - 旧字符串收藏和新对象收藏仍能匹配。
 - `resolutionShowAllModes` 开启时，隐藏刷新率仍不制造重复可见分辨率。
+- 便携版不再把 Electron 运行时数据写入系统用户目录。
 
 ## 风险文件
 

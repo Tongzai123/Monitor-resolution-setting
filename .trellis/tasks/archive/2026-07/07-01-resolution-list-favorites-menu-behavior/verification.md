@@ -13,6 +13,8 @@
 | 主进程语法检查 | `node --check src/electron.js` | 通过 |
 | 面板 preload 语法检查 | `node --check src/panel-preload.js` | 通过 |
 | 前端构建和 JSX 转译 | `npm run parcel-build` | 通过 |
+| 便携版构建 | `npm run portable` | 通过，生成 `dist\Twinkle Tray v1.17.2-portable.zip` |
+| 便携版数据目录验证 | 解压便携 zip 到 `%TEMP%\twinkle-portable-test`，正常启动 `Twinkle Tray.exe` 后检查目录 | 通过，`settings.json`、`mica.jpg`、`Code Cache`、`GPUCache`、`Local Storage` 等均生成在 exe 同级 `config` 目录 |
 
 ## 构建提示
 
@@ -22,6 +24,12 @@
 - `caniuse-lite` / Browserslist 数据超过八个月。
 
 这些提示不影响本次构建结果；本任务未安装依赖、未更新锁文件。
+
+## 便携版产物
+
+- 便携版路径：`C:\Users\11834\Desktop\code\Monitor-resolution-setting\dist\Twinkle Tray v1.17.2-portable.zip`
+- 便携版数据目录：解压后运行时使用 `<便携版目录>\config`
+- 说明：使用 `--show-console` 测试会在设置初始化前重启退出，不能作为数据目录生成验证；最终验证使用正常启动。
 
 ## 待手工验收
 
