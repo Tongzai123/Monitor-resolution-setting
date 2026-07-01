@@ -558,6 +558,23 @@ body[data-is-win11="false"] #root {
     border-radius: 6px;
     border: 1px solid color-mix(in srgb, var(--tray-text) 14%, transparent);
     background: color-mix(in srgb, var(--tray-background) 92%, black);
+
+    &::-webkit-scrollbar {
+        width: 10px;
+    }
+
+    &::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    &::-webkit-scrollbar-thumb {
+        border-radius: 20px;
+        background: rgba(122, 122, 122, 1);
+    }
+
+    &::-webkit-scrollbar-thumb:window-inactive {
+        background: rgba(122, 122, 122, 0.5);
+    }
 }
 
 .resolution-mode-group-title,

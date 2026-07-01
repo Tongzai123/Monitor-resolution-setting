@@ -415,23 +415,43 @@ const BrightnessPanel = memo(function BrightnessPanel() {
       return
     }
 
+    const includeAllModes = !!window.settings?.resolutionShowAllModes
+    const hasReusableModes = Array.isArray(current?.modes) && current?.includeAllModes === includeAllModes
+
     clearResolutionError(displayKey)
-    updateResolutionModesState(displayKey, { open: true, loading: true, error: false })
+    updateResolutionModesState(displayKey, { open: true, loading: !hasReusableModes, error: false })
     try {
       const result = await window.resolution.listModes(displayKey)
       updateResolutionModesState(displayKey, {
-        open: true,
         loading: false,
         modes: result?.modes || [],
+        includeAllModes,
         favorites: window.settings?.resolutionFavorites?.[displayKey] || [],
         error: false
       })
     } catch (error) {
-      updateResolutionModesState(displayKey, {
-        open: true,
-        loading: false,
-        error: error?.message || T.t("PANEL_RESOLUTION_LOAD_FAILED")
-      })
+      if (hasReusableModes) {
+        setState(prev => ({
+          ...prev,
+          resolutionModes: {
+            ...prev.resolutionModes,
+            [displayKey]: {
+              ...(prev.resolutionModes?.[displayKey] || {}),
+              loading: false,
+              error: false
+            }
+          },
+          resolutionErrors: {
+            ...prev.resolutionErrors,
+            [displayKey]: error?.message || T.t("PANEL_RESOLUTION_LOAD_FAILED")
+          }
+        }))
+      } else {
+        updateResolutionModesState(displayKey, {
+          loading: false,
+          error: error?.message || T.t("PANEL_RESOLUTION_LOAD_FAILED")
+        })
+      }
     }
   }
 
