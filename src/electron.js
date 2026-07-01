@@ -486,7 +486,7 @@ const defaultSettings = {
   monitorFeatures: {},
   monitorFeaturesSettings: {},
   resolutionControlsEnabled: true,
-  resolutionShowRefreshRate: true,
+  resolutionShowRefreshRate: false,
   resolutionHideLowRefreshRates: true,
   resolutionShowOnlyFavorites: false,
   resolutionShowAllModes: false,
@@ -1188,7 +1188,7 @@ async function doHotkey(hotkey) {
             throw new Error("Resolution favorite is not available.")
           }
           const mode = await findResolutionModeForFavorite(displayKey, favorite)
-          await applyResolutionModeWithRollback(displayKey, mode)
+          await applyResolutionModeDirect(displayKey, mode)
         } else if (action.type === "set" || action.type === "offset" || action.type === "cycle") {
 
           // Build list of all applicable monitors
@@ -1840,6 +1840,26 @@ async function applyResolutionModeWithRollback(displayKey, mode) {
   })
   refreshMonitors(true, true)
   return { id, result }
+}
+
+async function applyResolutionModeDirect(displayKey, mode) {
+  if (!settings.resolutionControlsEnabled) {
+    throw new Error("Resolution controls are disabled.")
+  }
+  if (pendingResolutionChange) {
+    throw new Error("A resolution change is already waiting for confirmation.")
+  }
+  if (!displayKey || !mode) {
+    throw new Error("Resolution target is missing.")
+  }
+  const deviceNameOrPath = getResolutionDisplayPath(displayKey)
+  const result = await w32disp.setDisplayMode({
+    deviceNameOrPath,
+    mode,
+    persistent: true
+  })
+  refreshMonitors(true, true)
+  return { result }
 }
 
 ipcMain.on('send-settings', (event, data) => {
@@ -2622,7 +2642,10 @@ ipcMain.on('resolution:list-modes', async function (event, data = {}) {
 ipcMain.on('resolution:apply-mode', async function (event, data = {}) {
   try {
     const displayKey = data.displayKey || data.deviceNameOrPath
-    const { id, result } = await applyResolutionModeWithRollback(displayKey, data.mode)
+    const direct = !!data.direct && !!data.mode && (settings.resolutionFavorites?.[displayKey] || []).some(favorite => isResolutionFavoriteMode(data.mode, favorite))
+    const { id, result } = direct
+      ? await applyResolutionModeDirect(displayKey, data.mode)
+      : await applyResolutionModeWithRollback(displayKey, data.mode)
     event.reply('resolution:apply-result', {
       requestId: data.requestId,
       id,
@@ -3756,52 +3779,69 @@ function getTrayMonitorName(monitor, names = {}) {
   return monitor.name || monitor.id || monitor.key
 }
 
-function getResolutionTrayMenuItem() {
-  if (!settings.resolutionControlsEnabled) return { label: "", visible: false }
+function getResolutionMenuDisplays() {
   const displayItems = []
   for (const monitor of Object.values(monitors || {})) {
     const displayKey = getResolutionMenuDisplayKey(monitor)
     if (!displayKey || !monitor?.resolution?.width || settings.hideDisplays?.[monitor.key] === true) continue
+    displayItems.push({ monitor, displayKey })
+  }
+  return displayItems
+}
 
-    const favorites = settings.resolutionFavorites?.[displayKey] || []
-    const submenu = []
-    if (favorites.length) {
-      for (const favorite of favorites) {
-        const mode = modeFromResolutionFavorite(favorite)
-        submenu.push({
-          label: formatResolutionModeLabel(mode),
-          type: "normal",
-          click: () => {
-            findResolutionModeForFavorite(displayKey, favorite).then(mode => {
-              return applyResolutionModeWithRollback(displayKey, mode)
-            }).catch(error => {
-              sendToAllWindows("resolution:error", {
-                displayKey,
-                operation: "tray",
-                error: serializeResolutionError(error)
-              })
-            })
-          }
-        })
-      }
-    } else {
+function buildResolutionFavoriteSubmenu(displayKey, monitor) {
+  const favorites = settings.resolutionFavorites?.[displayKey] || []
+  const submenu = []
+  if (favorites.length) {
+    for (const favorite of favorites) {
+      const mode = modeFromResolutionFavorite(favorite)
       submenu.push({
-        label: formatResolutionModeLabel(monitor.resolution),
-        enabled: false
-      })
-      submenu.push({
-        label: T.t("PANEL_RESOLUTION_MORE"),
+        label: formatResolutionModeLabel(mode),
         type: "normal",
-        click: () => toggleTray(true)
+        click: () => {
+          findResolutionModeForFavorite(displayKey, favorite).then(mode => {
+            return applyResolutionModeDirect(displayKey, mode)
+          }).catch(error => {
+            sendToAllWindows("resolution:error", {
+              displayKey,
+              operation: "tray",
+              error: serializeResolutionError(error)
+            })
+          })
+        }
       })
     }
-    displayItems.push({
-      label: getTrayMonitorName(monitor, settings.names || {}),
-      submenu: Menu.buildFromTemplate(submenu)
+  } else {
+    submenu.push({
+      label: formatResolutionModeLabel(monitor.resolution),
+      enabled: false
+    })
+    submenu.push({
+      label: T.t("PANEL_RESOLUTION_MORE"),
+      type: "normal",
+      click: () => toggleTray(true)
     })
   }
+  return submenu
+}
+
+function getResolutionTrayMenuItem() {
+  if (!settings.resolutionControlsEnabled) return { label: "", visible: false }
+  const displayItems = getResolutionMenuDisplays()
   if (!displayItems.length) return { label: "", visible: false }
-  return { label: T.t("SETTINGS_RESOLUTION_TITLE"), submenu: Menu.buildFromTemplate(displayItems) }
+  if (displayItems.length === 1) {
+    const [{ monitor, displayKey }] = displayItems
+    return { label: T.t("SETTINGS_RESOLUTION_TITLE"), submenu: Menu.buildFromTemplate(buildResolutionFavoriteSubmenu(displayKey, monitor)) }
+  }
+
+  const monitorItems = []
+  for (const { monitor, displayKey } of displayItems) {
+    monitorItems.push({
+      label: getTrayMonitorName(monitor, settings.names || {}),
+      submenu: Menu.buildFromTemplate(buildResolutionFavoriteSubmenu(displayKey, monitor))
+    })
+  }
+  return { label: T.t("SETTINGS_RESOLUTION_TITLE"), submenu: Menu.buildFromTemplate(monitorItems) }
 }
 
 function getProfilesMenuItem() {

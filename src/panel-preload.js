@@ -110,8 +110,8 @@ window.resolution = {
         return createResolutionRequest('resolution:list-modes', { displayKey }, 'resolution:modes')
             .then(data => data.result)
     },
-    applyMode(displayKey, mode) {
-        return createResolutionRequest('resolution:apply-mode', { displayKey, mode }, 'resolution:apply-result')
+    applyMode(displayKey, mode, options = {}) {
+        return createResolutionRequest('resolution:apply-mode', { displayKey, mode, ...options }, 'resolution:apply-result')
     },
     confirmChange(id) {
         return createResolutionRequest('resolution:confirm-change', { id }, 'resolution:confirm-result')

@@ -24,8 +24,50 @@ function getResolutionDisplayKey(monitor) {
 }
 
 function isCommonResolutionMode(mode) {
-  const refreshRate = mode.refreshRate ?? mode.displayFrequency ?? 0
+  const refreshRate = getResolutionModeRefreshRate(mode)
   return mode.isCurrent || ((mode.width || 0) >= 1280 && (mode.height || 0) >= 720 && (!refreshRate || refreshRate >= 59.5))
+}
+
+function getResolutionModeRefreshRate(mode) {
+  return mode?.refreshRate ?? mode?.displayFrequency ?? 0
+}
+
+function getResolutionSizeKey(mode) {
+  return `${mode?.width || 0}x${mode?.height || 0}`
+}
+
+function pickHigherRefreshMode(a, b) {
+  if (!a) return b
+  if (!b) return a
+  const aRefreshRate = getResolutionModeRefreshRate(a)
+  const bRefreshRate = getResolutionModeRefreshRate(b)
+  if (bRefreshRate > aRefreshRate) return b
+  if (bRefreshRate < aRefreshRate) return a
+  if (b.isCurrent && !a.isCurrent) return b
+  return a
+}
+
+function normalizeResolutionModesForDisplay(modes = [], favorites = [], settings = {}) {
+  let normalizedModes = modes.slice(0)
+  if (settings?.resolutionHideLowRefreshRates) {
+    normalizedModes = normalizedModes.filter(mode => {
+      const refreshRate = getResolutionModeRefreshRate(mode)
+      return mode.isCurrent || !refreshRate || refreshRate >= 59.5
+    })
+  }
+  if (settings?.resolutionShowOnlyFavorites) {
+    normalizedModes = normalizedModes.filter(mode => isResolutionFavoriteMode(mode, favorites) || mode.isCurrent)
+  }
+  if (settings?.resolutionShowRefreshRate === false) {
+    const modesBySize = new Map()
+    for (const mode of normalizedModes) {
+      if (!mode?.width || !mode?.height) continue
+      const sizeKey = getResolutionSizeKey(mode)
+      modesBySize.set(sizeKey, pickHigherRefreshMode(modesBySize.get(sizeKey), mode))
+    }
+    normalizedModes = Array.from(modesBySize.values())
+  }
+  return normalizedModes
 }
 
 function resolutionModeRenderKey(mode) {
@@ -63,17 +105,8 @@ function ResolutionModeList({ T, modesState, currentLabel, onSelect, onToggleFav
     return <div className="resolution-mode-list"><div className="resolution-mode-error">{modesState.error}</div></div>
   }
 
-  let modes = modesState.modes || []
   const favorites = modesState.favorites || []
-  if (window.settings?.resolutionHideLowRefreshRates) {
-    modes = modes.filter(mode => {
-      const refreshRate = mode.refreshRate ?? mode.displayFrequency
-      return mode.isCurrent || !refreshRate || refreshRate >= 59.5
-    })
-  }
-  if (window.settings?.resolutionShowOnlyFavorites) {
-    modes = modes.filter(mode => isResolutionFavoriteMode(mode, favorites) || mode.isCurrent)
-  }
+  const modes = normalizeResolutionModesForDisplay(modesState.modes || [], favorites, window.settings || {})
   if (!modes.length) {
     return <div className="resolution-mode-list"><div className="resolution-mode-empty">{T.t("PANEL_RESOLUTION_NO_MODES")}</div></div>
   }
@@ -89,7 +122,6 @@ function ResolutionModeList({ T, modesState, currentLabel, onSelect, onToggleFav
         <div className="resolution-mode-group-title">{label}</div>
         {groupModes.map((mode) => {
           const label = formatResolutionMode(mode, window.settings?.resolutionShowRefreshRate)
-          const favoriteKey = formatResolutionFavoriteKey(mode)
           const isFavorite = isResolutionFavoriteMode(mode, favorites)
           return (
             <button
@@ -409,7 +441,8 @@ const BrightnessPanel = memo(function BrightnessPanel() {
     clearResolutionError(displayKey)
     updateResolutionModesState(displayKey, { applying: true })
     try {
-      await window.resolution.applyMode(displayKey, mode)
+      const favorites = state.resolutionModes?.[displayKey]?.favorites || window.settings?.resolutionFavorites?.[displayKey] || []
+      await window.resolution.applyMode(displayKey, mode, { direct: isResolutionFavoriteMode(mode, favorites) })
       updateResolutionModesState(displayKey, { open: false, applying: false })
     } catch (error) {
       updateResolutionModesState(displayKey, { applying: false })
