@@ -69,6 +69,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Wrap portable package root folder
+        run: node scripts/wrap-portable-zip.js "dist/Twinkle.Tray.Resolution.Enhanced.v${{ steps.release_info.outputs.safe_version }}-portable.zip"
+
       - name: Publish GitHub Release
         shell: pwsh
         run: |

@@ -372,7 +372,9 @@ function enableMouseEvents() {
             hotkeyOverlayHide(true)
           } else {
             // Panel is displayed
-            if (!mainWindow.webContents.isDevToolsOpened()) {
+            if (shouldKeepPanelVisibleForResolutionConfirmation()) {
+              keepPanelVisibleForResolutionConfirmation()
+            } else if (!mainWindow.webContents.isDevToolsOpened()) {
               sendToAllWindows("panelBlur")
               showPanel(false)
             }
@@ -1442,6 +1444,11 @@ function hotkeyOverlayHide(force = true) {
     return false
   }
 
+  if (shouldKeepPanelVisibleForResolutionConfirmation()) {
+    keepPanelVisibleForResolutionConfirmation()
+    return false
+  }
+
   if (!force && mainWindow && mainWindow.isFocused()) {
     hotkeyOverlayStart(333)
     return false;
@@ -1732,6 +1739,36 @@ function broadcastResolutionPendingChange() {
   sendToAllWindows("resolution:pending-change", resolutionPendingSnapshot())
 }
 
+function shouldKeepPanelVisibleForResolutionConfirmation() {
+  return !!pendingResolutionChange
+}
+
+function keepPanelVisibleForResolutionConfirmation() {
+  if (!mainWindow) return false
+
+  if (hotkeyOverlayTimeout) {
+    clearTimeout(hotkeyOverlayTimeout)
+    hotkeyOverlayTimeout = false
+  }
+
+  canReposition = true
+  sendToAllWindows("display-mode", "normal")
+
+  if (!panelSize.visible || panelState !== "visible" || !mainWindow.isVisible()) {
+    sendMicaWallpaper()
+    showPanel(true, panelSize.height)
+    panelState = "visible"
+    sendToAllWindows('request-height')
+    mainWindow.webContents.send("tray-clicked")
+  } else {
+    setAlwaysOnTop(true)
+    mainWindow.show()
+    mainWindow.focus()
+  }
+
+  return true
+}
+
 function clearResolutionPendingChange() {
   if (pendingResolutionChange?.timeout) clearTimeout(pendingResolutionChange.timeout)
   if (pendingResolutionChange?.interval) clearInterval(pendingResolutionChange.interval)
@@ -1794,6 +1831,7 @@ function startResolutionPendingChange(pending) {
     revertPendingResolutionChange("timeout").catch(() => {})
   }, Math.max(1, settings.resolutionRevertTimeoutSeconds || 15) * 1000)
   broadcastResolutionPendingChange()
+  keepPanelVisibleForResolutionConfirmation()
 }
 
 async function applyResolutionModeWithRollback(displayKey, mode) {
@@ -2771,12 +2809,20 @@ ipcMain.on('panel-height', (event, height) => {
 })
 
 ipcMain.on('panel-hidden', () => {
+  if (shouldKeepPanelVisibleForResolutionConfirmation()) {
+    keepPanelVisibleForResolutionConfirmation()
+    return
+  }
   sendToAllWindows("display-mode", "normal")
   panelState = "hidden"
   if (settings.killWhenIdle) mainWindow.close()
 })
 
 ipcMain.on('blur-panel', () => {
+  if (shouldKeepPanelVisibleForResolutionConfirmation()) {
+    keepPanelVisibleForResolutionConfirmation()
+    return
+  }
   if (mainWindow) mainWindow.blur();
 })
 
@@ -2927,7 +2973,9 @@ function createPanel(toggleOnLoad = false, isRefreshing = false, showOnLoad = tr
   mainWindow.on("blur", () => {
     // Only run when not in an overlay
     if (canReposition) {
-      if (!mainWindow.webContents.isDevToolsOpened()) {
+      if (shouldKeepPanelVisibleForResolutionConfirmation()) {
+        keepPanelVisibleForResolutionConfirmation()
+      } else if (!mainWindow.webContents.isDevToolsOpened()) {
         sendToAllWindows("panelBlur")
         showPanel(false)
       }

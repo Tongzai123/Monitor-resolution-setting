@@ -75,6 +75,10 @@ function setPanelVisibility(visible) {
         document.activeElement.blur();
 }
 
+function shouldKeepPanelVisibleForResolutionConfirmation() {
+    return !!window.pendingResolutionChange
+}
+
 function requestMonitors() {
     ipc.send('request-monitors')
 }
@@ -160,6 +164,7 @@ function detectSunValley() {
 }
 
 function openSettings() {
+    if (shouldKeepPanelVisibleForResolutionConfirmation()) return
     setPanelVisibility(false)
     ipc.send('blur-panel')
     setTimeout(() => {
@@ -214,6 +219,7 @@ function shouldSendHeightUpdate() {
 }
 
 function turnOffDisplays() {
+    if (shouldKeepPanelVisibleForResolutionConfirmation()) return
     setPanelVisibility(false)
     ipc.send('blur-panel')
     setTimeout(() => {
@@ -237,6 +243,7 @@ ipc.on('tray-clicked', () => {
 })
 
 ipc.on("panelBlur", (e) => {
+    if (shouldKeepPanelVisibleForResolutionConfirmation()) return
     setPanelVisibility(false)
     setTimeout(() => global.gc(), 2000)
 })

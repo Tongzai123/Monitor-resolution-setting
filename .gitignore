@@ -27,3 +27,4 @@ debug.log
 bin/
 .agents/
 .codex/
+build-local-release.bat

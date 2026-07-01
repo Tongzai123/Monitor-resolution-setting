@@ -105,3 +105,36 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 4: 分辨率确认面板保持显示与便携包结构优化
+
+**Date**: 2026-07-01
+**Task**: 分辨率确认面板保持显示与便携包结构优化
+**Branch**: `main`
+
+### Summary
+
+实现分辨率切换确认期间面板保持显示和置顶，拦截外部点击、Escape、blur 等隐藏路径；更新版本到 v1.17.2-2，新增便携版 zip 外层文件夹重包脚本，调整 GitHub release workflow，并补充发布说明和本地打包 bat。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4971fd0` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
