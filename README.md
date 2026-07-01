@@ -1,5 +1,7 @@
 # Twinkle Tray 分辨率增强版
 
+中文 | [English](README.en.md) 
+
 本项目基于 [xanderfrangos/twinkle-tray](https://github.com/xanderfrangos/twinkle-tray) 的 `1.17.2` 版本二次开发，保留原版外接显示器亮度控制、托盘面板、快捷键、显示器配置和本地化能力，并在原版基础上增加了分辨率/刷新率显示与切换功能。
 
 本项目不是 `xanderfrangos/twinkle-tray` 官方原版。如果需要官方版本、官方文档或官方问题反馈，请访问上游项目：
