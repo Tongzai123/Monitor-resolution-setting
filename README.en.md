@@ -12,6 +12,10 @@ This project is not the official `xanderfrangos/twinkle-tray` release. For the o
 
 ![Twinkle Tray Resolution Enhanced screenshot](docs/images/resolution-panel.png)
 
+![Twinkle Tray resolution change prompt screenshot](docs/images/分辨率调整提示.png)
+
+![Twinkle Tray resolution favorites screenshot](docs/images/分辨率收藏.png)
+
 ## Main Enhancements
 
 ### Resolution and Refresh-Rate Display
@@ -124,9 +128,9 @@ Known situations that may affect monitor control include:
 - GPU control panels or third-party display tools take over color, brightness, or display configuration.
 - Remote desktop, virtual displays, cast displays, or unknown devices may not fully support resolution switching.
 
-## Special Thanks
+## Acknowledgements
 
-This project is based on Twinkle Tray. Thanks to [Xander Frangos](https://github.com/xanderfrangos), all Twinkle Tray contributors, and projects such as Electron, React, Node.js, node-ddcci, and win32-displayconfig.
+Thanks to the sincere, friendly, united, and professional [LinuxDo community](https://linux.do/latest), where I have learned a great deal about AI-related knowledge and practices.
 
 ## License
 

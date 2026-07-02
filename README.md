@@ -1,6 +1,6 @@
 # Twinkle Tray 分辨率增强版
 
-中文 | [English](README.en.md) 
+中文 | [English](README.en.md)
 
 本项目基于 [xanderfrangos/twinkle-tray](https://github.com/xanderfrangos/twinkle-tray) 的 `1.17.2` 版本二次开发，保留原版外接显示器亮度控制、托盘面板、快捷键、显示器配置和本地化能力，并在原版基础上增加了分辨率/刷新率显示与切换功能。
 
@@ -13,6 +13,10 @@
 English documentation: [README.en.md](README.en.md)
 
 ![Twinkle Tray 分辨率增强版截图](docs/images/resolution-panel.png)
+
+![Twinkle Tray 分辨率调整提示截图](docs/images/分辨率调整提示.png)
+
+![Twinkle Tray 分辨率收藏截图](docs/images/分辨率收藏.png)
 
 ## 主要增强功能
 
@@ -126,9 +130,9 @@ Twinkle Tray 原版使用 DDC/CI 和 WMI 与显示器通信。多数显示器支
 - 显卡控制面板或第三方显示器软件接管了颜色、亮度或显示配置。
 - 远程桌面、虚拟显示器、投屏设备或未知设备可能无法完整支持分辨率切换。
 
-## 特别感谢
+## 致谢
 
-本项目基于 Twinkle Tray 二次开发。感谢 [Xander Frangos](https://github.com/xanderfrangos) 和 Twinkle Tray 的所有贡献者，以及 Electron、React、Node.js、node-ddcci、win32-displayconfig 等项目。
+感谢真诚、友善、团结、专业的 [LinuxDo 社区](https://linux.do/latest)，让我学到很多 AI 相关的知识和玩法。
 
 ## 许可证
 
